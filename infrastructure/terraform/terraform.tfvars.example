@@ -1,0 +1,18 @@
+# Copy this file to terraform.tfvars and fill in your values
+# terraform.tfvars is gitignored for security
+
+aws_region  = "us-east-1"
+environment = "dev"
+
+# Database Configuration
+db_name     = "fantasy_football"
+db_username = "postgres"
+db_password = "CHANGE_ME_TO_STRONG_PASSWORD" # Use a strong password!
+
+# Instance sizing (adjust based on needs)
+db_instance_class      = "db.t4g.micro" # Free tier eligible
+db_allocated_storage   = 20
+
+# Production settings
+enable_deletion_protection = false # Set to true for production
+backup_retention_period    = 7     # Days to retain backups
