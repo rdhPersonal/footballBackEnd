@@ -63,7 +63,4 @@ output "espn_credentials_secret_arn" {
   value       = aws_secretsmanager_secret.espn_credentials.arn
 }
 
-output "nat_gateway_ip" {
-  description = "NAT Gateway public IP"
-  value       = aws_eip.nat.public_ip
-}
+# NAT Gateway output removed - NAT Gateway has been removed to save costs

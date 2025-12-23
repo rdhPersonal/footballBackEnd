@@ -47,28 +47,62 @@ class NFLStatsFetcher:
         
         logger.info(f"Built game map with {len(self.game_map)} games")
     
-    def extract_stat_value(self, stats: List[Dict], stat_name: str) -> int:
-        """Extract a stat value from ESPN stats array."""
-        for stat in stats:
-            if stat.get('name') == stat_name:
-                return int(float(stat.get('value', 0)))
-        return 0
+    def extract_stat_by_key(self, stats: List[str], keys: List[str], key_name: str) -> int:
+        """Extract a stat value by key name from ESPN stats array."""
+        try:
+            if key_name in keys:
+                index = keys.index(key_name)
+                if index < len(stats):
+                    value = stats[index]
+                    # Handle compound values like "21/34" for completions/attempts
+                    if '/' in value and key_name == 'completions/passingAttempts':
+                        return int(value.split('/')[0])  # Return completions
+                    elif '-' in value and 'sacks' in key_name:
+                        return int(float(value.split('-')[0]))  # Return sacks count
+                    else:
+                        return int(float(value))
+            return 0
+        except (ValueError, IndexError):
+            return 0
     
-    def extract_stat_value_float(self, stats: List[Dict], stat_name: str) -> float:
-        """Extract a float stat value from ESPN stats array."""
-        for stat in stats:
-            if stat.get('name') == stat_name:
-                return float(stat.get('value', 0))
-        return 0.0
+    def extract_stat_by_key_float(self, stats: List[str], keys: List[str], key_name: str) -> float:
+        """Extract a float stat value by key name from ESPN stats array."""
+        try:
+            if key_name in keys:
+                index = keys.index(key_name)
+                if index < len(stats):
+                    value = stats[index]
+                    if '-' in value and 'sacks' in key_name:
+                        return float(value.split('-')[0])  # Return sacks count
+                    else:
+                        return float(value)
+            return 0.0
+        except (ValueError, IndexError):
+            return 0.0
+    
+    def extract_passing_attempts(self, stats: List[str], keys: List[str]) -> int:
+        """Extract passing attempts from completions/passingAttempts field."""
+        try:
+            if 'completions/passingAttempts' in keys:
+                index = keys.index('completions/passingAttempts')
+                if index < len(stats):
+                    value = stats[index]
+                    if '/' in value:
+                        return int(value.split('/')[1])  # Return attempts
+            return 0
+        except (ValueError, IndexError):
+            return 0
     
     def transform_player_stats(self, espn_stats: Dict[str, Any], 
-                               game_id: int) -> Optional[Dict[str, Any]]:
+                               game_id: int, 
+                               category_keys: List[str] = None) -> Optional[Dict[str, Any]]:
         """
         Transform ESPN player stats to API format.
         
         Args:
             espn_stats: Player stats data from ESPN
             game_id: Database game ID
+            category_keys: List of stat keys for this category
         
         Returns:
             Stats data in API format, or None if transformation fails
@@ -90,44 +124,46 @@ class NFLStatsFetcher:
             
             # Extract stats
             stats = espn_stats.get('stats', [])
+            if not category_keys:
+                category_keys = []
             
             return {
                 'player_id': player_db_id,
                 'nfl_game_id': game_id,
                 
                 # Passing
-                'passing_attempts': self.extract_stat_value(stats, 'passingAttempts'),
-                'passing_completions': self.extract_stat_value(stats, 'completions'),
-                'passing_yards': self.extract_stat_value(stats, 'passingYards'),
-                'passing_touchdowns': self.extract_stat_value(stats, 'passingTouchdowns'),
-                'interceptions': self.extract_stat_value(stats, 'interceptions'),
+                'passing_attempts': self.extract_passing_attempts(stats, category_keys),
+                'passing_completions': self.extract_stat_by_key(stats, category_keys, 'completions/passingAttempts'),
+                'passing_yards': self.extract_stat_by_key(stats, category_keys, 'passingYards'),
+                'passing_touchdowns': self.extract_stat_by_key(stats, category_keys, 'passingTouchdowns'),
+                'interceptions': self.extract_stat_by_key(stats, category_keys, 'interceptions'),
                 
                 # Rushing
-                'rushing_attempts': self.extract_stat_value(stats, 'rushingAttempts'),
-                'rushing_yards': self.extract_stat_value(stats, 'rushingYards'),
-                'rushing_touchdowns': self.extract_stat_value(stats, 'rushingTouchdowns'),
+                'rushing_attempts': self.extract_stat_by_key(stats, category_keys, 'rushingAttempts'),
+                'rushing_yards': self.extract_stat_by_key(stats, category_keys, 'rushingYards'),
+                'rushing_touchdowns': self.extract_stat_by_key(stats, category_keys, 'rushingTouchdowns'),
                 
                 # Receiving
-                'receptions': self.extract_stat_value(stats, 'receptions'),
-                'receiving_yards': self.extract_stat_value(stats, 'receivingYards'),
-                'receiving_touchdowns': self.extract_stat_value(stats, 'receivingTouchdowns'),
-                'targets': self.extract_stat_value(stats, 'receivingTargets'),
+                'receptions': self.extract_stat_by_key(stats, category_keys, 'receptions'),
+                'receiving_yards': self.extract_stat_by_key(stats, category_keys, 'receivingYards'),
+                'receiving_touchdowns': self.extract_stat_by_key(stats, category_keys, 'receivingTouchdowns'),
+                'targets': self.extract_stat_by_key(stats, category_keys, 'receivingTargets'),
                 
                 # Other
-                'fumbles_lost': self.extract_stat_value(stats, 'fumblesLost'),
-                'two_point_conversions': self.extract_stat_value(stats, 'twoPtConversions'),
+                'fumbles_lost': self.extract_stat_by_key(stats, category_keys, 'fumblesLost'),
+                'two_point_conversions': self.extract_stat_by_key(stats, category_keys, 'twoPtConversions'),
                 
                 # Kicker
-                'field_goals_made': self.extract_stat_value(stats, 'fieldGoalsMade'),
-                'field_goals_attempted': self.extract_stat_value(stats, 'fieldGoalsAttempted'),
-                'extra_points_made': self.extract_stat_value(stats, 'extraPointsMade'),
-                'extra_points_attempted': self.extract_stat_value(stats, 'extraPointsAttempted'),
+                'field_goals_made': self.extract_stat_by_key(stats, category_keys, 'fieldGoalsMade'),
+                'field_goals_attempted': self.extract_stat_by_key(stats, category_keys, 'fieldGoalsAttempted'),
+                'extra_points_made': self.extract_stat_by_key(stats, category_keys, 'extraPointsMade'),
+                'extra_points_attempted': self.extract_stat_by_key(stats, category_keys, 'extraPointsAttempted'),
                 
                 # Defense
-                'sacks': self.extract_stat_value_float(stats, 'sacks'),
-                'interceptions_defense': self.extract_stat_value(stats, 'interceptions'),
-                'fumbles_recovered': self.extract_stat_value(stats, 'fumblesRecovered'),
-                'touchdowns_defense': self.extract_stat_value(stats, 'defensiveTouchdowns'),
+                'sacks': self.extract_stat_by_key_float(stats, category_keys, 'sacks-sackYardsLost'),
+                'interceptions_defense': self.extract_stat_by_key(stats, category_keys, 'interceptions'),
+                'fumbles_recovered': self.extract_stat_by_key(stats, category_keys, 'fumblesRecovered'),
+                'touchdowns_defense': self.extract_stat_by_key(stats, category_keys, 'defensiveTouchdowns'),
                 'points_allowed': 0  # Not typically in player stats
             }
         
@@ -149,21 +185,34 @@ class NFLStatsFetcher:
         try:
             summary = self.espn_client.get_game_summary(game_espn_id)
             
+            # Debug: Log the structure we're getting
+            logger.debug(f"Game summary keys: {list(summary.keys())}")
+            
             all_stats = []
             
             # Extract box score
             boxscore = summary.get('boxscore', {})
-            players = boxscore.get('players', [])
+            logger.debug(f"Boxscore keys: {list(boxscore.keys()) if boxscore else 'No boxscore'}")
             
-            for team_players in players:
+            players = boxscore.get('players', [])
+            logger.info(f"Processing {len(players)} team player groups")
+            
+            for i, team_players in enumerate(players):
                 # Each team has multiple stat categories
                 statistics = team_players.get('statistics', [])
+                logger.debug(f"Team {i} has {len(statistics)} stat categories")
                 
-                for stat_category in statistics:
+                for j, stat_category in enumerate(statistics):
+                    # Log the category info
+                    if isinstance(stat_category, dict):
+                        category_name = stat_category.get('name', 'Unknown')
+                        category_keys = stat_category.get('keys', [])
+                        logger.debug(f"Team {i}, Category {j} ({category_name}): {len(stat_category.get('athletes', []))} athletes")
+                    
                     athletes = stat_category.get('athletes', [])
                     
-                    for athlete_stats in athletes:
-                        player_stat = self.transform_player_stats(athlete_stats, game_db_id)
+                    for k, athlete_stats in enumerate(athletes):
+                        player_stat = self.transform_player_stats(athlete_stats, game_db_id, category_keys)
                         if player_stat:
                             all_stats.append(player_stat)
             
@@ -202,15 +251,49 @@ class NFLStatsFetcher:
         all_stats = []
         
         for game in api_games:
-            # We need the ESPN game ID - we don't have it stored
-            # For now, we'll skip this and note it needs to be added to the schema
-            logger.warning("ESPN game ID not stored in database - cannot fetch detailed stats")
-            logger.info("To enable stats fetching, add 'external_id' column to nfl_games table")
-            break
+            external_id = game.get('external_id')
+            game_db_id = game.get('id')
+            
+            if not external_id:
+                logger.warning(f"Game {game_db_id} missing external_id, skipping")
+                continue
+            
+            # Extract ESPN game ID from external_id (format: "espn_401772510")
+            if external_id.startswith('espn_'):
+                espn_game_id = external_id.replace('espn_', '')
+            else:
+                espn_game_id = external_id
+            
+            logger.info(f"Fetching stats for game {espn_game_id} (week {game.get('week')})")
+            
+            game_stats = self.fetch_game_stats(espn_game_id, game_db_id)
+            all_stats.extend(game_stats)
         
-        # For now, return a message about the limitation
-        return {
-            "success": False,
-            "message": "Stats fetching requires external_id field in nfl_games table",
-            "note": "Add external_id VARCHAR(50) to nfl_games table to store ESPN game IDs"
-        }
+        logger.info(f"Fetched {len(all_stats)} total player stats")
+        
+        # Post to API in batches
+        if all_stats:
+            batch_size = 100
+            total_inserted = 0
+            total_updated = 0
+            
+            for i in range(0, len(all_stats), batch_size):
+                batch = all_stats[i:i + batch_size]
+                try:
+                    result = self.api_client.post_nfl_stats(batch)
+                    total_inserted += result.get('inserted_count', 0)
+                    total_updated += result.get('updated_count', 0)
+                except Exception as e:
+                    logger.error(f"Failed to post stats batch {i}-{i+len(batch)}: {e}")
+            
+            final_result = {
+                "success": True,
+                "inserted_count": total_inserted,
+                "updated_count": total_updated,
+                "message": f"Posted {len(all_stats)} stats: {total_inserted} inserted, {total_updated} updated"
+            }
+            logger.info(f"Posted stats: {final_result}")
+            return final_result
+        else:
+            logger.warning("No stats to post")
+            return {"success": False, "message": "No stats fetched"}

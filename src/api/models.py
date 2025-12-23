@@ -64,6 +64,7 @@ class NFLGameBase(BaseModel):
     away_score: Optional[int] = None
     is_final: bool = Field(default=False)
     game_type: str = Field(default="regular", max_length=20)
+    external_id: Optional[str] = Field(None, max_length=50)
 
 
 class NFLGameCreate(NFLGameBase):

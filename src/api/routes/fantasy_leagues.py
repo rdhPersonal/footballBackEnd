@@ -76,9 +76,8 @@ def create_leagues(bulk_data: BulkFantasyLeaguesCreate):
             cursor.execute("""
                 INSERT INTO league (name, season, espn_league_id, num_teams, playoff_start_week, championship_week)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
+                ON CONFLICT (espn_league_id, season) DO UPDATE SET
                     name = EXCLUDED.name,
-                    espn_league_id = EXCLUDED.espn_league_id,
                     num_teams = EXCLUDED.num_teams,
                     playoff_start_week = EXCLUDED.playoff_start_week,
                     championship_week = EXCLUDED.championship_week,

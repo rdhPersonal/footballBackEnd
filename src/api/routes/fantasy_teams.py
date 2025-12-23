@@ -65,10 +65,9 @@ def create_teams(bulk_data: BulkFantasyTeamsCreate):
                     league_id, team_name, owner_name, espn_team_id
                 )
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
+                ON CONFLICT (league_id, espn_team_id) DO UPDATE SET
                     team_name = EXCLUDED.team_name,
                     owner_name = EXCLUDED.owner_name,
-                    espn_team_id = EXCLUDED.espn_team_id,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING (xmax = 0) AS inserted
             """, (

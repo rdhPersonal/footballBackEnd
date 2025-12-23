@@ -70,8 +70,7 @@ def create_roster_entries(bulk_data: BulkRosterEntriesCreate):
                     fantasy_team_id, player_id, acquired_date, released_date, acquisition_type
                 )
                 VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    acquired_date = EXCLUDED.acquired_date,
+                ON CONFLICT (fantasy_team_id, player_id, acquired_date) DO UPDATE SET
                     released_date = EXCLUDED.released_date,
                     acquisition_type = EXCLUDED.acquisition_type,
                     updated_at = CURRENT_TIMESTAMP

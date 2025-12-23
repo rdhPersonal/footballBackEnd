@@ -44,6 +44,9 @@ class NFLGamesFetcher:
             Game data in API format, or None if transformation fails
         """
         try:
+            # Get ESPN game ID
+            espn_game_id = espn_event.get('id')
+            
             # Get game date
             date_str = espn_event.get('date')
             game_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
@@ -107,7 +110,8 @@ class NFLGamesFetcher:
                 'home_score': home_team['score'],
                 'away_score': away_team['score'],
                 'is_final': is_completed,
-                'game_type': game_type
+                'game_type': game_type,
+                'external_id': f"espn_{espn_game_id}" if espn_game_id else None
             }
         
         except Exception as e:

@@ -18,7 +18,7 @@ def get_players(
     position: Optional[str] = Query(None),
     nfl_team_id: Optional[int] = Query(None),
     status: str = Query("active"),
-    limit: int = Query(100, ge=1, le=500)
+    limit: int = Query(100, ge=1, le=10000)
 ):
     """
     Get NFL players with optional filtering.

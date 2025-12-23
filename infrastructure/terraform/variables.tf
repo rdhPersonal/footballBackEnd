@@ -70,3 +70,17 @@ variable "bastion_public_key" {
   type        = string
   default     = ""
 }
+
+# Cognito Variables
+variable "admin_email" {
+  description = "Admin user email for Cognito"
+  type        = string
+  sensitive   = true
+}
+
+variable "admin_temp_password" {
+  description = "Temporary password for admin user"
+  type        = string
+  default     = "TempPass123!"
+  sensitive   = true
+}

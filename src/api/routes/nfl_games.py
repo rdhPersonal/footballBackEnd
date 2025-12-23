@@ -106,15 +106,16 @@ def create_games(bulk_data: BulkNFLGamesCreate):
             cursor.execute("""
                 INSERT INTO nfl_games (
                     season, week, game_date, home_team_id, away_team_id,
-                    home_score, away_score, is_final, game_type
+                    home_score, away_score, is_final, game_type, external_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (season, week, home_team_id, away_team_id) DO UPDATE SET
                     game_date = EXCLUDED.game_date,
                     home_score = EXCLUDED.home_score,
                     away_score = EXCLUDED.away_score,
                     is_final = EXCLUDED.is_final,
                     game_type = EXCLUDED.game_type,
+                    external_id = EXCLUDED.external_id,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING (xmax = 0) AS inserted
             """, (
@@ -126,7 +127,8 @@ def create_games(bulk_data: BulkNFLGamesCreate):
                 game.home_score,
                 game.away_score,
                 game.is_final,
-                game.game_type
+                game.game_type,
+                game.external_id
             ))
             
             result = cursor.fetchone()
