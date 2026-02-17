@@ -51,3 +51,25 @@ output "rds_db_name" {
   description = "RDS database name"
   value       = aws_db_instance.main.db_name
 }
+
+# Phase 4 outputs
+
+output "cognito_user_pool_id" {
+  description = "Cognito User Pool ID"
+  value       = aws_cognito_user_pool.main.id
+}
+
+output "cognito_client_id" {
+  description = "Cognito App Client ID (for frontend PKCE flow)"
+  value       = aws_cognito_user_pool_client.frontend.id
+}
+
+output "cognito_domain" {
+  description = "Cognito Hosted UI domain URL"
+  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
+}
+
+output "api_gateway_url" {
+  description = "API Gateway base URL"
+  value       = aws_apigatewayv2_api.main.api_endpoint
+}

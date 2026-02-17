@@ -9,8 +9,16 @@ bastion_ssh_cidr      = "***REDACTED_IP***/32"
 bastion_key_name      = "football-bastion"
 bastion_instance_type = "t3.micro"
 
-# RDS
+# RDS (Phase 2)
 db_name           = "football"
 db_username       = "footballadmin"
 db_password       = "***REDACTED_DB_PASSWORD***"
 db_instance_class = "db.t4g.micro"
+
+# Cognito (Phase 4)
+cognito_domain_prefix = "football-dev"
+cognito_callback_urls = ["http://localhost:3000/api/auth/callback"]
+cognito_logout_urls   = ["http://localhost:3000"]
+
+# Frontend
+frontend_url = "http://localhost:3000"
