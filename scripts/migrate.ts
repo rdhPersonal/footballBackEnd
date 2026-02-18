@@ -97,6 +97,20 @@ function getMigrationFiles(): string[] {
     .map((f) => path.join(MIGRATIONS_DIR, f));
 }
 
+async function ensureMigrationsTable(client: Client): Promise<void> {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      filename    TEXT        PRIMARY KEY,
+      applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function getAppliedMigrations(client: Client): Promise<Set<string>> {
+  const result = await client.query('SELECT filename FROM schema_migrations');
+  return new Set(result.rows.map((r: { filename: string }) => r.filename));
+}
+
 async function runMigrations() {
   const config = getConfig();
   const migrationFiles = getMigrationFiles();
@@ -129,15 +143,41 @@ async function runMigrations() {
     await client.connect();
     console.log(`Connected to ${config.dbName} on ${config.rdsHost}\n`);
 
+    await ensureMigrationsTable(client);
+    const applied = await getAppliedMigrations(client);
+
+    let appliedCount = 0;
+    let skippedCount = 0;
+
     for (const file of migrationFiles) {
       const filename = path.basename(file);
+
+      if (applied.has(filename)) {
+        console.log(`Skipping ${filename} (already applied)`);
+        skippedCount++;
+        continue;
+      }
+
       const sql = fs.readFileSync(file, 'utf-8');
       console.log(`Running ${filename}...`);
-      await client.query(sql);
-      console.log(`  ✓ ${filename} applied`);
+
+      await client.query('BEGIN');
+      try {
+        await client.query(sql);
+        await client.query(
+          'INSERT INTO schema_migrations (filename) VALUES ($1)',
+          [filename],
+        );
+        await client.query('COMMIT');
+        console.log(`  ✓ ${filename} applied`);
+        appliedCount++;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw new Error(`Migration ${filename} failed: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
-    console.log('\nAll migrations complete.');
+    console.log(`\nMigrations complete: ${appliedCount} applied, ${skippedCount} skipped.`);
     await client.end();
   } finally {
     tunnel.kill();

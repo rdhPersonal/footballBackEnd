@@ -88,8 +88,11 @@ export async function fetchTeams(): Promise<EspnTeam[]> {
   }));
 }
 
-export async function fetchTeamRoster(teamEspnId: string): Promise<EspnPlayer[]> {
-  const data = await fetchJson(`${ESPN_V2}/teams/${teamEspnId}/roster`) as {
+export async function fetchTeamRoster(teamEspnId: string, season?: number): Promise<EspnPlayer[]> {
+  const url = season
+    ? `${ESPN_V2}/teams/${teamEspnId}/roster?season=${season}`
+    : `${ESPN_V2}/teams/${teamEspnId}/roster`;
+  const data = await fetchJson(url) as {
     athletes: Array<{
       items: Array<Record<string, unknown>>;
     }>;

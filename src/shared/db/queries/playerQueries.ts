@@ -86,14 +86,17 @@ export async function getPlayerById(
 ): Promise<PlayerWithCurrentTeam | null> {
   const sql = `
     SELECT p.*,
-      tr.team_abbr AS current_team_abbr,
-      tr.roster_status
+      latest_roster.team_abbr AS current_team_abbr,
+      latest_roster.roster_status
     FROM players p
-    LEFT JOIN team_rosters tr ON tr.player_id = p.id
-      AND tr.season = (SELECT MAX(season) FROM team_rosters WHERE player_id = p.id)
-      AND tr.week_end IS NULL
+    LEFT JOIN LATERAL (
+      SELECT tr.team_abbr, tr.roster_status
+      FROM team_rosters tr
+      WHERE tr.player_id = p.id
+      ORDER BY tr.season DESC, tr.week_start DESC, tr.id DESC
+      LIMIT 1
+    ) latest_roster ON true
     WHERE p.id = $1
-    LIMIT 1
   `;
 
   const result = await pool.query(sql, [id]);

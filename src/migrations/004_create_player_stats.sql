@@ -18,6 +18,6 @@ CREATE TABLE IF NOT EXISTS player_stats (
   CONSTRAINT uq_player_stats_player_season_week UNIQUE (player_id, season, week)
 );
 
-CREATE INDEX idx_player_stats_player_season ON player_stats (player_id, season);
-CREATE INDEX idx_player_stats_season_week ON player_stats (season, week);
-CREATE INDEX idx_player_stats_team_season ON player_stats (team_abbr, season);
+CREATE INDEX IF NOT EXISTS idx_player_stats_player_season ON player_stats (player_id, season);
+CREATE INDEX IF NOT EXISTS idx_player_stats_season_week ON player_stats (season, week);
+CREATE INDEX IF NOT EXISTS idx_player_stats_team_season ON player_stats (team_abbr, season);

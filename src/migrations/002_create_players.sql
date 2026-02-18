@@ -14,5 +14,5 @@ CREATE TABLE IF NOT EXISTS players (
   updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_players_position ON players (position);
-CREATE INDEX idx_players_name ON players (name);
+CREATE INDEX IF NOT EXISTS idx_players_position ON players (position);
+CREATE INDEX IF NOT EXISTS idx_players_name ON players (name);

@@ -13,4 +13,4 @@ CREATE TABLE IF NOT EXISTS nfl_teams (
   CONSTRAINT uq_nfl_teams_abbr_season UNIQUE (abbr, season)
 );
 
-CREATE INDEX idx_nfl_teams_season ON nfl_teams (season);
+CREATE INDEX IF NOT EXISTS idx_nfl_teams_season ON nfl_teams (season);

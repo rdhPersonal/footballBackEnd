@@ -7,14 +7,13 @@ import {
   fetchPlayerGamelog,
   delay,
   type EspnPlayer,
-  type EspnPlayerGamelog,
+  type EspnTeam,
 } from '../src/shared/external-api/client';
 
 const LOCAL_PORT = 15432;
 const SEASONS = [2023, 2024, 2025];
 const API_DELAY_MS = 300;
 
-// NFL team conference/division mapping
 const TEAM_INFO: Record<string, { conference: string; division: string }> = {
   ARI: { conference: 'NFC', division: 'West' },
   ATL: { conference: 'NFC', division: 'South' },
@@ -170,7 +169,7 @@ async function upsertRosterStint(
      VALUES ($1, $2, $3, $4, $5, 'active', 'signed')
      ON CONFLICT (player_id, season, week_start) DO UPDATE SET
        team_abbr = EXCLUDED.team_abbr,
-       week_end = EXCLUDED.week_end`,
+       week_end = GREATEST(team_rosters.week_end, EXCLUDED.week_end)`,
     [playerId, teamAbbr, season, weekStart, weekEnd],
   );
 }
@@ -181,16 +180,18 @@ async function upsertGameStats(
   teamAbbr: string,
   season: number,
   week: number,
+  eventId: string,
   statDetails: Record<string, string>,
 ) {
   await db.query(
-    `INSERT INTO player_stats (player_id, team_abbr, season, week, games_played, total_points, stat_details)
-     VALUES ($1, $2, $3, $4, 1, 0, $5)
+    `INSERT INTO player_stats (player_id, team_abbr, season, week, event_id, games_played, total_points, stat_details)
+     VALUES ($1, $2, $3, $4, $5, 1, 0, $6)
      ON CONFLICT (player_id, season, week) DO UPDATE SET
        team_abbr = EXCLUDED.team_abbr,
+       event_id = EXCLUDED.event_id,
        stat_details = EXCLUDED.stat_details,
        updated_at = NOW()`,
-    [playerId, teamAbbr, season, week, JSON.stringify(statDetails)],
+    [playerId, teamAbbr, season, week, eventId, JSON.stringify(statDetails)],
   );
 }
 
@@ -218,95 +219,131 @@ async function backfill() {
     const espnTeams = await fetchTeams();
     console.log(`Found ${espnTeams.length} teams.`);
 
-    // Insert teams for each season
     const teamData = espnTeams.map((t) => ({ abbr: t.abbreviation, name: t.displayName }));
     for (const season of SEASONS) {
       await upsertTeams(db, teamData, season);
     }
     console.log(`Teams inserted for seasons: ${SEASONS.join(', ')}\n`);
 
-    // Step 2: Fetch rosters and discover players
-    console.log('=== Step 2: Fetching rosters and player data ===');
-    const allPlayers = new Map<string, { player: EspnPlayer; dbId: string; teamAbbr: string }>();
+    // Step 2: Fetch rosters per season and discover players with per-season team attribution.
+    // Fetching per-season rosters ensures historical team associations are captured correctly
+    // (e.g. a player traded from BUF to KC mid-2024 shows up on BUF's 2023 roster).
+    console.log('=== Step 2: Fetching per-season rosters and player data ===');
 
-    for (const team of espnTeams) {
-      process.stdout.write(`  ${team.abbreviation}: fetching roster... `);
-      await delay(API_DELAY_MS);
+    const playerIndex = new Map<string, { player: EspnPlayer; dbId: string }>();
+    const playerTeamsBySeason = new Map<string, Map<number, string>>();
 
-      try {
-        const roster = await fetchTeamRoster(team.espnId);
-        let count = 0;
+    const teamLookup = new Map<string, EspnTeam>();
+    for (const t of espnTeams) teamLookup.set(t.espnId, t);
 
-        for (const player of roster) {
-          if (!allPlayers.has(player.espnId)) {
-            const dbId = await upsertPlayer(db, player);
-            allPlayers.set(player.espnId, {
-              player,
-              dbId,
-              teamAbbr: team.abbreviation,
-            });
-            count++;
+    for (const season of SEASONS) {
+      console.log(`  Season ${season}:`);
+      for (const team of espnTeams) {
+        process.stdout.write(`    ${team.abbreviation}: `);
+        await delay(API_DELAY_MS);
+
+        try {
+          const roster = await fetchTeamRoster(team.espnId, season);
+          let newCount = 0;
+
+          for (const player of roster) {
+            if (!playerIndex.has(player.espnId)) {
+              const dbId = await upsertPlayer(db, player);
+              playerIndex.set(player.espnId, { player, dbId });
+              newCount++;
+            }
+
+            if (!playerTeamsBySeason.has(player.espnId)) {
+              playerTeamsBySeason.set(player.espnId, new Map());
+            }
+            playerTeamsBySeason.get(player.espnId)!.set(season, team.abbreviation);
           }
-        }
 
-        console.log(`${roster.length} players (${count} new)`);
-      } catch (err) {
-        console.log(`ERROR: ${err instanceof Error ? err.message : err}`);
+          console.log(`${roster.length} players (${newCount} new)`);
+        } catch (err) {
+          console.log(`ERROR: ${err instanceof Error ? err.message : err}`);
+        }
       }
     }
 
-    console.log(`\nTotal unique players discovered: ${allPlayers.size}\n`);
+    console.log(`\nTotal unique players discovered: ${playerIndex.size}\n`);
 
     // Step 3: Fetch gamelogs and build roster stints + stats
     console.log('=== Step 3: Fetching gamelogs for all players ===');
 
-    // Filter to skill positions for gamelogs (QB, RB, WR, TE, K)
-    const skillPlayers = [...allPlayers.values()].filter((p) =>
+    const skillPlayers = [...playerIndex.values()].filter((p) =>
       ['QB', 'RB', 'WR', 'TE', 'K'].includes(p.player.positionAbbr),
     );
     console.log(`Fetching gamelogs for ${skillPlayers.length} skill-position players across ${SEASONS.length} seasons.\n`);
 
     let processed = 0;
     let statsInserted = 0;
+    const failures: Array<{ player: string; espnId: string; season: number; error: string }> = [];
 
-    for (const { player, dbId, teamAbbr } of skillPlayers) {
+    for (const { player, dbId } of skillPlayers) {
       processed++;
       if (processed % 50 === 0 || processed === skillPlayers.length) {
-        console.log(`  Progress: ${processed}/${skillPlayers.length} players (${statsInserted} stat rows inserted)`);
+        console.log(`  Progress: ${processed}/${skillPlayers.length} players (${statsInserted} stat rows inserted, ${failures.length} failures)`);
       }
+
+      const seasonTeams = playerTeamsBySeason.get(player.espnId) ?? new Map<number, string>();
 
       for (const season of SEASONS) {
         await delay(API_DELAY_MS);
+
+        // Resolve team for this season: prefer per-season roster, fall back to latest known
+        const teamAbbr = seasonTeams.get(season)
+          ?? seasonTeams.get(Math.max(...seasonTeams.keys()))
+          ?? 'UNK';
 
         try {
           const gamelog = await fetchPlayerGamelog(player.espnId, season);
           if (!gamelog || gamelog.games.length === 0) continue;
 
-          // Sort games by week
           const sortedGames = [...gamelog.games].sort((a, b) => a.week - b.week);
           const firstWeek = sortedGames[0].week;
           const lastWeek = sortedGames[sortedGames.length - 1].week;
 
-          // Create a roster stint for this season
-          await upsertRosterStint(db, dbId, teamAbbr, season, firstWeek, lastWeek);
+          // Wrap roster + stats writes for this player-season in a transaction
+          await db.query('BEGIN');
+          try {
+            await upsertRosterStint(db, dbId, teamAbbr, season, firstWeek, lastWeek);
 
-          // Insert per-game stats
-          for (const game of sortedGames) {
-            await upsertGameStats(db, dbId, teamAbbr, season, game.week, game.stats);
-            statsInserted++;
+            for (const game of sortedGames) {
+              await upsertGameStats(db, dbId, teamAbbr, season, game.week, game.eventId, game.stats);
+              statsInserted++;
+            }
+
+            await db.query('COMMIT');
+          } catch (txErr) {
+            await db.query('ROLLBACK');
+            throw txErr;
           }
-        } catch {
-          // Skip players whose gamelogs fail (e.g., rookies without data for older seasons)
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          failures.push({
+            player: player.fullName,
+            espnId: player.espnId,
+            season,
+            error: errorMsg,
+          });
+          console.error(`  [WARN] Failed: ${player.fullName} (${player.espnId}) season ${season}: ${errorMsg}`);
         }
       }
     }
 
     console.log(`\nBackfill complete!`);
-    console.log(`  Players: ${allPlayers.size}`);
+    console.log(`  Players: ${playerIndex.size}`);
     console.log(`  Stat rows: ${statsInserted}`);
     console.log(`  Seasons: ${SEASONS.join(', ')}`);
 
-    // Verify counts
+    if (failures.length > 0) {
+      console.warn(`\n${failures.length} failure(s) during backfill:`);
+      for (const f of failures) {
+        console.warn(`  - ${f.player} (${f.espnId}) season ${f.season}: ${f.error}`);
+      }
+    }
+
     const teamCount = await db.query('SELECT COUNT(*) FROM nfl_teams');
     const playerCount = await db.query('SELECT COUNT(*) FROM players');
     const rosterCount = await db.query('SELECT COUNT(*) FROM team_rosters');

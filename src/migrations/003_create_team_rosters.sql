@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS team_rosters (
   CONSTRAINT uq_team_rosters_player_season_week UNIQUE (player_id, season, week_start)
 );
 
-CREATE INDEX idx_team_rosters_player_season ON team_rosters (player_id, season);
-CREATE INDEX idx_team_rosters_team_season ON team_rosters (team_abbr, season);
-CREATE INDEX idx_team_rosters_transaction ON team_rosters (season, transaction_type);
-CREATE INDEX idx_team_rosters_status ON team_rosters (roster_status, season);
+CREATE INDEX IF NOT EXISTS idx_team_rosters_player_season ON team_rosters (player_id, season);
+CREATE INDEX IF NOT EXISTS idx_team_rosters_team_season ON team_rosters (team_abbr, season);
+CREATE INDEX IF NOT EXISTS idx_team_rosters_transaction ON team_rosters (season, transaction_type);
+CREATE INDEX IF NOT EXISTS idx_team_rosters_status ON team_rosters (roster_status, season);
