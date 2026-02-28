@@ -1,0 +1,24 @@
+{
+  "name": "football-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AWS backend for NFL player statistics — Lambda, API Gateway, RDS PostgreSQL",
+  "scripts": {
+    "build": "tsx scripts/build.ts",
+    "migrate": "tsx scripts/migrate.ts",
+    "backfill": "tsx scripts/backfill.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
