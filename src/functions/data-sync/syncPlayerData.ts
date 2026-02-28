@@ -5,6 +5,7 @@ import {
   fetchTeamRoster,
   fetchPlayerGamelog,
   delay,
+  type EspnGameStat,
 } from '../../shared/external-api/client';
 
 const API_DELAY_MS = 300;
@@ -18,6 +19,73 @@ const SYNC_LOCK_ID = 738291;
 // default (SYNC_TRAILING_WEEKS=0 or unset), but when set to a positive
 // value only the most recent N weeks are written — with a floor of 2.
 const MIN_TRAILING_WEEKS = 2;
+
+type DerivedStint = {
+  teamAbbr: string;
+  weekStart: number;
+  weekEnd: number;
+  rosterStatus: 'active' | 'practice_squad';
+  transactionType: 'signed' | 'traded' | 'promoted' | 'demoted';
+};
+
+function deriveRosterStintsFromGames(games: EspnGameStat[], fallbackTeamAbbr: string): DerivedStint[] {
+  if (games.length === 0) return [];
+
+  const normalized = games
+    .map((g) => ({
+      ...g,
+      teamAbbr: g.teamAbbr || fallbackTeamAbbr || 'UNK',
+    }))
+    .sort((a, b) => a.week - b.week);
+
+  const stints: DerivedStint[] = [];
+  let prev: DerivedStint | null = null;
+
+  for (const game of normalized) {
+    if (!prev) {
+      prev = {
+        teamAbbr: game.teamAbbr,
+        weekStart: game.week,
+        weekEnd: game.week,
+        rosterStatus: 'active',
+        transactionType: 'signed',
+      };
+      stints.push(prev);
+      continue;
+    }
+
+    const sameTeam: boolean = prev.teamAbbr === game.teamAbbr;
+    const contiguous: boolean = game.week === prev.weekEnd + 1;
+
+    if (sameTeam && contiguous) {
+      prev.weekEnd = game.week;
+      continue;
+    }
+
+    const gapStart = prev.weekEnd + 1;
+    const gapEnd = game.week - 1;
+    if (sameTeam && gapStart <= gapEnd) {
+      stints.push({
+        teamAbbr: game.teamAbbr,
+        weekStart: gapStart,
+        weekEnd: gapEnd,
+        rosterStatus: 'practice_squad',
+        transactionType: 'demoted',
+      });
+    }
+
+    prev = {
+      teamAbbr: game.teamAbbr,
+      weekStart: game.week,
+      weekEnd: game.week,
+      rosterStatus: 'active',
+      transactionType: sameTeam ? 'promoted' : 'traded',
+    };
+    stints.push(prev);
+  }
+
+  return stints;
+}
 
 /**
  * Derive the current NFL season year.
@@ -124,23 +192,40 @@ export async function handler(event: ScheduledEvent): Promise<void> {
           gamesToWrite = sortedGames.filter((g) => g.week > cutoff);
         }
 
-        // Derive stint boundaries from the full gamelog (not the trailing window)
-        // so the roster record always reflects the complete season span.
-        const firstWeek = sortedGames[0].week;
-        const lastWeek = sortedGames[sortedGames.length - 1].week;
+        const derivedStints = deriveRosterStintsFromGames(sortedGames, team.abbreviation);
 
         // Wrap all writes for this player in a transaction for atomicity
         await db.query('BEGIN');
         try {
+          // Replace stints for this player-season so reruns converge deterministically.
           await db.query(
-            `INSERT INTO team_rosters (player_id, team_abbr, season, week_start, week_end, roster_status, transaction_type)
-             VALUES ($1, $2, $3, $4, $5, 'active', 'signed')
-             ON CONFLICT (player_id, season, week_start) DO UPDATE SET
-               week_end = GREATEST(team_rosters.week_end, EXCLUDED.week_end)`,
-            [playerId, team.abbreviation, season, firstWeek, lastWeek],
+            'DELETE FROM team_rosters WHERE player_id = $1 AND season = $2',
+            [playerId, season],
           );
 
+          for (const stint of derivedStints) {
+            await db.query(
+              `INSERT INTO team_rosters (player_id, team_abbr, season, week_start, week_end, roster_status, transaction_type)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               ON CONFLICT (player_id, season, week_start) DO UPDATE SET
+                 team_abbr = EXCLUDED.team_abbr,
+                 week_end = GREATEST(team_rosters.week_end, EXCLUDED.week_end),
+                 roster_status = EXCLUDED.roster_status,
+                 transaction_type = EXCLUDED.transaction_type`,
+              [
+                playerId,
+                stint.teamAbbr,
+                season,
+                stint.weekStart,
+                stint.weekEnd,
+                stint.rosterStatus,
+                stint.transactionType,
+              ],
+            );
+          }
+
           for (const game of gamesToWrite) {
+            const gameTeam = game.teamAbbr || team.abbreviation || 'UNK';
             await db.query(
               `INSERT INTO player_stats (player_id, team_abbr, season, week, event_id, games_played, total_points, stat_details)
                VALUES ($1, $2, $3, $4, $5, 1, 0, $6)
@@ -149,7 +234,7 @@ export async function handler(event: ScheduledEvent): Promise<void> {
                  event_id = EXCLUDED.event_id,
                  stat_details = EXCLUDED.stat_details,
                  updated_at = NOW()`,
-              [playerId, team.abbreviation, season, game.week, game.eventId, JSON.stringify(game.stats)],
+              [playerId, gameTeam, season, game.week, game.eventId, JSON.stringify(game.stats)],
             );
             statsInserted++;
           }

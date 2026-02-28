@@ -7,7 +7,7 @@ import {
   fetchPlayerGamelog,
   delay,
   type EspnPlayer,
-  type EspnTeam,
+  type EspnGameStat,
 } from '../src/shared/external-api/client';
 
 const LOCAL_PORT = 15432;
@@ -163,15 +163,90 @@ async function upsertRosterStint(
   season: number,
   weekStart: number,
   weekEnd: number | null,
+  rosterStatus: string,
+  transactionType: string,
 ) {
   await db.query(
     `INSERT INTO team_rosters (player_id, team_abbr, season, week_start, week_end, roster_status, transaction_type)
-     VALUES ($1, $2, $3, $4, $5, 'active', 'signed')
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (player_id, season, week_start) DO UPDATE SET
        team_abbr = EXCLUDED.team_abbr,
-       week_end = GREATEST(team_rosters.week_end, EXCLUDED.week_end)`,
-    [playerId, teamAbbr, season, weekStart, weekEnd],
+       week_end = GREATEST(team_rosters.week_end, EXCLUDED.week_end),
+       roster_status = EXCLUDED.roster_status,
+       transaction_type = EXCLUDED.transaction_type`,
+    [playerId, teamAbbr, season, weekStart, weekEnd, rosterStatus, transactionType],
   );
+}
+
+type DerivedStint = {
+  teamAbbr: string;
+  weekStart: number;
+  weekEnd: number;
+  rosterStatus: 'active' | 'practice_squad';
+  transactionType:
+    | 'signed'
+    | 'traded'
+    | 'promoted'
+    | 'demoted';
+};
+
+function deriveRosterStintsFromGames(games: EspnGameStat[], fallbackTeamAbbr: string): DerivedStint[] {
+  if (games.length === 0) return [];
+
+  const normalized = games
+    .map((g) => ({
+      ...g,
+      teamAbbr: g.teamAbbr || fallbackTeamAbbr || 'UNK',
+    }))
+    .sort((a, b) => a.week - b.week);
+
+  const stints: DerivedStint[] = [];
+  let prev: DerivedStint | null = null;
+
+  for (const game of normalized) {
+    if (!prev) {
+      prev = {
+        teamAbbr: game.teamAbbr,
+        weekStart: game.week,
+        weekEnd: game.week,
+        rosterStatus: 'active',
+        transactionType: 'signed',
+      };
+      stints.push(prev);
+      continue;
+    }
+
+    const sameTeam: boolean = prev.teamAbbr === game.teamAbbr;
+    const contiguous: boolean = game.week === prev.weekEnd + 1;
+
+    if (sameTeam && contiguous) {
+      prev.weekEnd = game.week;
+      continue;
+    }
+
+    const gapStart = prev.weekEnd + 1;
+    const gapEnd = game.week - 1;
+    if (sameTeam && gapStart <= gapEnd) {
+      stints.push({
+        teamAbbr: game.teamAbbr,
+        weekStart: gapStart,
+        weekEnd: gapEnd,
+        rosterStatus: 'practice_squad',
+        transactionType: 'demoted',
+      });
+    }
+
+    prev = {
+      teamAbbr: game.teamAbbr,
+      weekStart: game.week,
+      weekEnd: game.week,
+      rosterStatus: 'active',
+      transactionType: sameTeam ? 'promoted' : 'traded',
+    };
+    stints.push(prev);
+  }
+
+  return stints;
 }
 
 async function upsertGameStats(
@@ -232,9 +307,6 @@ async function backfill() {
 
     const playerIndex = new Map<string, { player: EspnPlayer; dbId: string }>();
     const playerTeamsBySeason = new Map<string, Map<number, string>>();
-
-    const teamLookup = new Map<string, EspnTeam>();
-    for (const t of espnTeams) teamLookup.set(t.espnId, t);
 
     for (const season of SEASONS) {
       console.log(`  Season ${season}:`);
@@ -301,16 +373,33 @@ async function backfill() {
           if (!gamelog || gamelog.games.length === 0) continue;
 
           const sortedGames = [...gamelog.games].sort((a, b) => a.week - b.week);
-          const firstWeek = sortedGames[0].week;
-          const lastWeek = sortedGames[sortedGames.length - 1].week;
+          const derivedStints = deriveRosterStintsFromGames(sortedGames, teamAbbr);
 
           // Wrap roster + stats writes for this player-season in a transaction
           await db.query('BEGIN');
           try {
-            await upsertRosterStint(db, dbId, teamAbbr, season, firstWeek, lastWeek);
+            // Replace stints for this player-season so reruns converge deterministically.
+            await db.query(
+              'DELETE FROM team_rosters WHERE player_id = $1 AND season = $2',
+              [dbId, season],
+            );
+
+            for (const stint of derivedStints) {
+              await upsertRosterStint(
+                db,
+                dbId,
+                stint.teamAbbr,
+                season,
+                stint.weekStart,
+                stint.weekEnd,
+                stint.rosterStatus,
+                stint.transactionType,
+              );
+            }
 
             for (const game of sortedGames) {
-              await upsertGameStats(db, dbId, teamAbbr, season, game.week, game.eventId, game.stats);
+              const gameTeam = game.teamAbbr || teamAbbr || 'UNK';
+              await upsertGameStats(db, dbId, gameTeam, season, game.week, game.eventId, game.stats);
               statsInserted++;
             }
 

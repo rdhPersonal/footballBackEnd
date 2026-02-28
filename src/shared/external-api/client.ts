@@ -46,6 +46,7 @@ export interface EspnPlayer {
 export interface EspnGameStat {
   eventId: string;
   week: number;
+  teamAbbr: string;
   stats: Record<string, string>;
 }
 
@@ -147,7 +148,11 @@ export async function fetchPlayerGamelog(
 
   const eventsMap = (data.events ?? {}) as Record<
     string,
-    { week?: number; opponent?: { abbreviation?: string } }
+    {
+      week?: number;
+      opponent?: { abbreviation?: string };
+      team?: { abbreviation?: string };
+    }
   >;
 
   const seasonTypes = (data.seasonTypes ?? []) as Array<{
@@ -176,13 +181,14 @@ export async function fetchPlayerGamelog(
     const eventInfo = eventsMap[ge.eventId];
     const week = eventInfo?.week;
     if (week == null) continue;
+    const teamAbbr = eventInfo?.team?.abbreviation ?? '';
 
     const stats: Record<string, string> = {};
     for (let i = 0; i < names.length && i < ge.stats.length; i++) {
       stats[names[i]] = ge.stats[i];
     }
 
-    games.push({ eventId: ge.eventId, week, stats });
+    games.push({ eventId: ge.eventId, week, teamAbbr, stats });
   }
 
   return {
