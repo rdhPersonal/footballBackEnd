@@ -10,12 +10,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/unit/**/*.test.ts'],
-    testTimeout: 10_000,
-    coverage: {
-      provider: 'v8',
-      include: ['src/**/*.ts'],
-      exclude: ['src/migrations/**'],
-    },
+    include: ['tests/integration/**/*.test.ts'],
+    testTimeout: 30_000,
   },
 });
