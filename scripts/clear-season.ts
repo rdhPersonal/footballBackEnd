@@ -211,7 +211,7 @@ async function previewCounts(db: Client, args: CliArgs) {
 
   const rosterCount = await db.query(
     weekFilter
-      ? 'SELECT COUNT(*) FROM team_rosters WHERE season = $1 AND week_start >= $2 AND week_start <= $3'
+      ? 'SELECT COUNT(*) FROM team_rosters WHERE season = $1 AND week_start <= $3 AND COALESCE(week_end, 18) >= $2'
       : 'SELECT COUNT(*) FROM team_rosters WHERE season = $1',
     weekFilter ? [args.season, args.weekStart, args.weekEnd] : [args.season],
   );
@@ -299,7 +299,7 @@ async function clearSeason() {
 
       const rostersResult = await db.query(
         weekFilter
-          ? 'DELETE FROM team_rosters WHERE season = $1 AND week_start >= $2 AND week_start <= $3'
+          ? 'DELETE FROM team_rosters WHERE season = $1 AND week_start <= $3 AND COALESCE(week_end, 18) >= $2'
           : 'DELETE FROM team_rosters WHERE season = $1',
         weekFilter ? [args.season, args.weekStart, args.weekEnd] : [args.season],
       );

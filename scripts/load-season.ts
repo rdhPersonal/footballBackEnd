@@ -275,7 +275,7 @@ async function cleanSeasonData(db: Client, season: number, weekStart: number, we
   console.log(`  Deleted ${statsResult.rowCount} player_stats rows`);
 
   const rostersResult = await db.query(
-    'DELETE FROM team_rosters WHERE season = $1 AND week_start >= $2 AND week_start <= $3',
+    'DELETE FROM team_rosters WHERE season = $1 AND week_start <= $3 AND COALESCE(week_end, 18) >= $2',
     [season, weekStart, weekEnd],
   );
   console.log(`  Deleted ${rostersResult.rowCount} team_rosters rows`);
@@ -438,7 +438,7 @@ async function loadSeason() {
       [cliArgs.season, cliArgs.weekStart, cliArgs.weekEnd],
     );
     const rosterCount = await db.query(
-      'SELECT COUNT(*) FROM team_rosters WHERE season = $1 AND week_start >= $2 AND week_start <= $3',
+      'SELECT COUNT(*) FROM team_rosters WHERE season = $1 AND week_start <= $3 AND COALESCE(week_end, 18) >= $2',
       [cliArgs.season, cliArgs.weekStart, cliArgs.weekEnd],
     );
     const playerCount = await db.query('SELECT COUNT(*) FROM players');
