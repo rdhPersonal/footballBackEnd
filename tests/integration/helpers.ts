@@ -1,31 +1,41 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
-const API_URL = process.env.API_URL || 'https://z8y6zlxrmc.execute-api.us-west-2.amazonaws.com';
-const COGNITO_CLIENT_ID = process.env.COGNITO_CLIENT_ID || '12hi070g8mrjkefh1pciv624om';
-const COGNITO_USERNAME = process.env.COGNITO_USERNAME || 'testuser@football.dev';
-const COGNITO_PASSWORD = process.env.COGNITO_PASSWORD || 'TestPass123!';
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `Required environment variable ${name} is not set. ` +
+      `Set it before running integration tests.`,
+    );
+  }
+  return value;
+}
+
 const AWS_REGION = process.env.AWS_REGION || 'us-west-2';
 
 let cachedToken: string | null = null;
 
 export function getApiUrl(): string {
-  return API_URL;
+  return requireEnv('API_URL');
 }
 
 export function getAuthToken(): string {
   if (cachedToken) return cachedToken;
 
+  const clientId = requireEnv('COGNITO_CLIENT_ID');
+  const username = requireEnv('COGNITO_USERNAME');
+  const password = requireEnv('COGNITO_PASSWORD');
+
   try {
-    const result = execSync(
-      `aws cognito-idp initiate-auth ` +
-      `--client-id ${COGNITO_CLIENT_ID} ` +
-      `--auth-flow USER_PASSWORD_AUTH ` +
-      `--auth-parameters USERNAME=${COGNITO_USERNAME},PASSWORD='${COGNITO_PASSWORD}' ` +
-      `--region ${AWS_REGION} ` +
-      `--query 'AuthenticationResult.IdToken' ` +
-      `--output text`,
-      { encoding: 'utf-8', timeout: 15_000 },
-    ).trim();
+    const result = execFileSync('aws', [
+      'cognito-idp', 'initiate-auth',
+      '--client-id', clientId,
+      '--auth-flow', 'USER_PASSWORD_AUTH',
+      '--auth-parameters', `USERNAME=${username},PASSWORD=${password}`,
+      '--region', AWS_REGION,
+      '--query', 'AuthenticationResult.IdToken',
+      '--output', 'text',
+    ], { encoding: 'utf-8', timeout: 15_000 }).trim();
 
     if (!result || result === 'None') {
       throw new Error('Empty token returned');
@@ -35,7 +45,8 @@ export function getAuthToken(): string {
     return cachedToken;
   } catch (err) {
     throw new Error(
-      `Failed to get Cognito token. Ensure AWS CLI is configured and credentials are valid.\n` +
+      `Failed to get Cognito token. Ensure AWS CLI is configured and ` +
+      `COGNITO_CLIENT_ID, COGNITO_USERNAME, COGNITO_PASSWORD env vars are set.\n` +
       `Original error: ${err instanceof Error ? err.message : err}`,
     );
   }
@@ -47,7 +58,7 @@ export interface ApiResponse<T = unknown> {
 }
 
 export async function apiGet<T = unknown>(path: string, token?: string): Promise<ApiResponse<T>> {
-  const url = `${API_URL}${path}`;
+  const url = `${getApiUrl()}${path}`;
   const headers: Record<string, string> = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
