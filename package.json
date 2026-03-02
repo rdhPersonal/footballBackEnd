@@ -8,7 +8,14 @@
     "migrate": "tsx scripts/migrate.ts",
     "backfill": "tsx scripts/backfill.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:coverage": "vitest run --coverage",
+    "load-season": "tsx scripts/load-season.ts",
+    "clear-season": "tsx scripts/clear-season.ts"
   },
   "dependencies": {
     "pg": "^8.13.0"
@@ -17,8 +24,10 @@
     "@types/aws-lambda": "^8.10.145",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.11.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "esbuild": "^0.24.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
   }
 }

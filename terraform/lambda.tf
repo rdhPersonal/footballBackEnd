@@ -5,7 +5,7 @@
 # ------------------------------------------------------------------------------
 
 locals {
-  lambda_runtime = "nodejs20.x"
+  lambda_runtime = "nodejs22.x"
   lambda_timeout = 30
   lambda_memory  = 256
 

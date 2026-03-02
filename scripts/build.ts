@@ -50,7 +50,7 @@ async function build() {
       entryPoints: [ep],
       bundle: true,
       platform: 'node',
-      target: 'node20',
+      target: 'node22',
       outdir,
       format: 'cjs',
       sourcemap: true,

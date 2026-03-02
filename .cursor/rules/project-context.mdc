@@ -6,7 +6,7 @@ alwaysApply: true
 
 # footballBackEnd -- Project Context
 
-This document captures the full state of the footballBackEnd project as of February 16, 2026. Read this before making any changes.
+This document captures the full state of the footballBackEnd project as of March 1, 2026. Read this before making any changes.
 
 ## What This Project Is
 
@@ -122,10 +122,22 @@ Per-game weekly statistics. `player_id`, `team_abbr` (denormalized), `season`, `
 ### Scripts (all in `scripts/`)
 | File | Purpose |
 |------|---------|
-| `build.ts` | esbuild bundler -- outputs each function to `dist/<group>/<name>/` as CJS |
+| `build.ts` | esbuild bundler -- outputs each function to `dist/<group>/<name>/` as CJS (target: node22) |
 | `migrate.ts` | Runs SQL migrations via SSH tunnel through bastion |
 | `backfill.ts` | One-time ESPN data import for 2023-2025 seasons |
+| `load-season.ts` | Incremental data load -- specific season/week ranges with upsert (supports `--week`, `--full-season`, `--clean`) |
+| `clear-season.ts` | Delete data for a season or week range (supports `--dry-run`, `--include-teams`, `--include-players`) |
 | `bootstrap-tf-backend.sh` | Creates S3 bucket + DynamoDB table for Terraform state |
+
+### Tests (all in `tests/`)
+| File | Purpose |
+|------|---------|
+| `unit/deriveRosterStints.test.ts` | 10 tests: roster stint derivation from gamelogs |
+| `unit/validation.test.ts` | 15 tests: parseIntParam bounds/error handling |
+| `unit/response.test.ts` | 9 tests: response helpers, CORS headers, status codes |
+| `unit/errorHandler.test.ts` | 3 tests: Lambda error handler wrapper |
+| `integration/api.test.ts` | 26 tests: all 4 API endpoints via live API Gateway + auth + data integrity |
+| `integration/helpers.ts` | Test utilities: Cognito token acquisition, typed API client |
 
 ## Live Resource Identifiers
 
@@ -185,11 +197,11 @@ terraform apply -var-file=environments/dev.tfvars
 # Lambda code is zipped by Terraform's archive_file data source from dist/
 ```
 
-The build produces `dist/<group>/<functionName>/<functionName>.js` (CommonJS). Terraform zips each function directory and uploads it. Lambda runtime is `nodejs20.x`.
+The build produces `dist/<group>/<functionName>/<functionName>.js` (CommonJS). Terraform zips each function directory and uploads it. Lambda runtime is `nodejs22.x`.
 
 ## Known Issues and Quirks
 
-1. **ESM vs CJS**: Lambda Node.js 20 runtime defaults to CommonJS. The build uses `format: 'cjs'` in esbuild. If you ever switch to ESM, you need a `package.json` with `"type": "module"` in each function's zip.
+1. **ESM vs CJS**: Lambda Node.js 22 runtime defaults to CommonJS. The build uses `format: 'cjs'` in esbuild. If you ever switch to ESM, you need a `package.json` with `"type": "module"` in each function's zip.
 
 2. **RDS SSL**: RDS requires SSL connections. All `pg` clients use `ssl: { rejectUnauthorized: false }`. This is in `src/shared/db/client.ts` (for Lambda queries), `scripts/migrate.ts`, `scripts/backfill.ts`, and `src/functions/data-sync/syncPlayerData.ts`.
 
