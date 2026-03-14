@@ -80,3 +80,36 @@ With the tunnel running, connect to the database locally:
 ```bash
 psql -h localhost -U footballadmin -d football
 ```
+
+## Frontend/BFF TypeScript API Contract (library dependency)
+
+This repo now exposes a shared workspace package: `@football/api-contract` at `packages/api-contract`.
+
+### What to import
+
+- `FootballApiContract` for endpoint -> method -> query/response/error mappings
+- Endpoint DTOs (for example `GetPlayersResponse`, `GetPlayerStatsResponse`, `ApiErrorResponse`)
+
+The backend re-exports this package from `src/shared/types/api-contract.ts` for backward compatibility.
+
+### Build and deploy impact
+
+- **Lambda runtime deploy artifact**: no direct impact today because this package is type-only contract metadata used at compile time.
+- **CI/build**: yes, it is now part of repository dependency graph (workspace dependency), so installs and type checks include it.
+- If runtime code is ever added to the package, bundle/deploy behavior should be re-evaluated.
+
+### Versioning strategy
+
+Recommended options:
+
+1. **Internal lockstep (current)**
+   - Keep package private + workspace-linked (`workspace:*`) while frontend and backend evolve together.
+2. **Published package (when repos are independent)**
+   - Publish `@football/api-contract` (GitHub Package Registry or npm).
+   - Use **SemVer**:
+     - patch: docs/non-breaking type tweaks
+     - minor: additive DTO fields/endpoints
+     - major: breaking field renames/removals/route contract changes
+   - Have frontend/BFF pin a version range and update intentionally.
+
+For production teams, pair SemVer with a changelog and a small contract-compatibility checklist in PRs.
