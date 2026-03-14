@@ -282,6 +282,9 @@ export async function fetchPlayerProfile(espnPlayerId: string): Promise<EspnPlay
     dateOfBirth: (data.dateOfBirth as string) ?? undefined,
     heightInches: typeof data.height === 'number' ? Math.round(data.height) : undefined,
     weightLbs: typeof data.weight === 'number' ? Math.round(data.weight) : undefined,
+    // TODO: ESPN core API does include college info under data.college.name for many players.
+    // The roster endpoint (fetchTeamRoster) already populates this field. Left undefined here
+    // because historical-discovery players can be backfilled from a separate profile fetch if needed.
     college: undefined,
     headshotUrl: typeof data.headshot === 'object' && data.headshot
       ? (data.headshot as Record<string, string>).href

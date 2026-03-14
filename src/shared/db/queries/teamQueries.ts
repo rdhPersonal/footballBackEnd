@@ -29,10 +29,16 @@ export async function getTeams(
     return result.rows;
   }
 
+  // DISTINCT ON must order by the distinct column first to pick the latest season per team.
+  // Wrap in a subquery so the outer ORDER BY can sort by conference/division/name consistently
+  // with the season-filter path.
   const result = await pool.query(
-    `SELECT DISTINCT ON (abbr) id, abbr, name, conference, division, bye_week, season
-     FROM nfl_teams
-     ORDER BY abbr, season DESC`,
+    `SELECT * FROM (
+       SELECT DISTINCT ON (abbr) id, abbr, name, conference, division, bye_week, season
+       FROM nfl_teams
+       ORDER BY abbr, season DESC
+     ) t
+     ORDER BY conference, division, name`,
   );
   return result.rows;
 }

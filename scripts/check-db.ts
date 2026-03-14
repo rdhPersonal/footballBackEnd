@@ -19,9 +19,16 @@ async function waitForPort(port: number): Promise<void> {
 }
 
 async function main() {
-  const bastionIp = process.env.BASTION_IP!;
-  const rdsHost = process.env.RDS_HOST!;
-  const dbPassword = process.env.DB_PASSWORD!;
+  const bastionIp = process.env.BASTION_IP;
+  const rdsHost = process.env.RDS_HOST;
+  const dbPassword = process.env.DB_PASSWORD;
+
+  if (!bastionIp || !rdsHost || !dbPassword) {
+    const missing = ['BASTION_IP', 'RDS_HOST', 'DB_PASSWORD'].filter((k) => !process.env[k]);
+    console.error(`Missing required environment variables: ${missing.join(', ')}`);
+    console.error('See .cursor/rules/terraform-and-scripts.mdc for how to set these.');
+    process.exit(1);
+  }
 
   const tunnel = spawn('ssh', [
     '-i', `${process.env.HOME}/.ssh/football-bastion.pem`,

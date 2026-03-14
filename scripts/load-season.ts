@@ -443,54 +443,68 @@ async function loadSeason() {
 
     console.log(`\nAfter current-roster pass: ${statsInserted} stat rows, ${allEventIds.size} unique game events\n`);
 
-    console.log('=== Step 4: Discovering historical players from game boxscores ===');
+    console.log('=== Step 4a: Scanning game boxscores to collect unknown player IDs ===');
     const eventList = [...allEventIds];
-    let newPlayersFound = 0;
+    // Map from ESPN ID -> the team abbr seen in the boxscore (used for the profile pass).
+    const unknownPlayerMap = new Map<string, string>();
     let eventsScanned = 0;
-    const newPlayerQueue: Array<{ espnId: string; teamAbbr: string }> = [];
 
     for (const eventId of eventList) {
       eventsScanned++;
       if (eventsScanned % 25 === 0 || eventsScanned === eventList.length) {
-        console.log(`  Events scanned: ${eventsScanned}/${eventList.length} (${newPlayersFound} new players found)`);
+        console.log(`  Events scanned: ${eventsScanned}/${eventList.length} (${unknownPlayerMap.size} unknown players collected)`);
       }
 
       await delay(API_DELAY_MS);
       try {
         const boxscorePlayers = await fetchGameSummaryPlayers(eventId);
         for (const bp of boxscorePlayers) {
-          if (playerIndex.has(bp.espnId)) continue;
-
-          const profile = await fetchPlayerProfile(bp.espnId);
-          await delay(API_DELAY_MS);
-
-          if (!profile) {
-            playerIndex.set(bp.espnId, {
-              player: {
-                espnId: bp.espnId,
-                fullName: bp.displayName,
-                position: '',
-                positionAbbr: 'DEF',
-                teamAbbr: bp.teamAbbr,
-                headshotUrl: bp.headshotUrl,
-              },
-              dbId: '',
-            });
-            continue;
-          }
-
-          profile.teamAbbr = bp.teamAbbr;
-          const dbId = await upsertPlayer(db, profile);
-          playerIndex.set(bp.espnId, { player: profile, dbId });
-          playerTeams.set(bp.espnId, bp.teamAbbr);
-          newPlayersFound++;
-
-          if (skillPositions.includes(profile.positionAbbr)) {
-            newPlayerQueue.push({ espnId: bp.espnId, teamAbbr: bp.teamAbbr });
+          if (!playerIndex.has(bp.espnId) && !unknownPlayerMap.has(bp.espnId)) {
+            unknownPlayerMap.set(bp.espnId, bp.teamAbbr);
           }
         }
       } catch (err) {
         console.error(`  [WARN] Failed scanning event ${eventId}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    console.log(`\nFound ${unknownPlayerMap.size} unknown players across ${eventsScanned} events.`);
+
+    console.log('\n=== Step 4b: Fetching profiles for unknown players ===');
+    let newPlayersFound = 0;
+    let profilesAttempted = 0;
+    const newPlayerQueue: Array<{ espnId: string; teamAbbr: string }> = [];
+
+    for (const [espnId, teamAbbr] of unknownPlayerMap) {
+      profilesAttempted++;
+      if (profilesAttempted % 50 === 0 || profilesAttempted === unknownPlayerMap.size) {
+        console.log(`  Profiles fetched: ${profilesAttempted}/${unknownPlayerMap.size} (${newPlayersFound} inserted)`);
+      }
+
+      await delay(API_DELAY_MS);
+      try {
+        const profile = await fetchPlayerProfile(espnId);
+
+        if (!profile) {
+          // Profile unavailable — mark as a placeholder so we don't re-attempt this player.
+          playerIndex.set(espnId, {
+            player: { espnId, fullName: '', position: '', positionAbbr: 'DEF', teamAbbr, headshotUrl: undefined },
+            dbId: '',
+          });
+          continue;
+        }
+
+        profile.teamAbbr = teamAbbr;
+        const dbId = await upsertPlayer(db, profile);
+        playerIndex.set(espnId, { player: profile, dbId });
+        playerTeams.set(espnId, teamAbbr);
+        newPlayersFound++;
+
+        if (skillPositions.includes(profile.positionAbbr)) {
+          newPlayerQueue.push({ espnId, teamAbbr });
+        }
+      } catch (err) {
+        console.error(`  [WARN] Failed profile fetch for ${espnId}: ${err instanceof Error ? err.message : err}`);
       }
     }
 

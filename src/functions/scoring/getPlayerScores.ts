@@ -5,9 +5,12 @@ import { success, badRequest, notFound } from '../../shared/middleware/response'
 import { withErrorHandler } from '../../shared/middleware/errorHandler';
 import { parseIntParam, ValidationError } from '../../shared/middleware/validation';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const playerId = event.pathParameters?.id;
   if (!playerId) return badRequest('Player ID is required');
+  if (!UUID_RE.test(playerId)) return badRequest('Player ID must be a valid UUID');
 
   const params = event.queryStringParameters || {};
 

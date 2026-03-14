@@ -95,6 +95,10 @@ function parseReceivingFromMap(m: StatMap): Omit<ReceivingStats, 'playerId' | 's
 }
 
 function parseKickingFromMap(m: StatMap): Omit<KickingStats, 'playerId' | 'season' | 'week' | 'teamAbbr' | 'eventId'> | null {
+  // ESPN returns FG and XP stats as pre-combined "made-attempted" strings (e.g. "3-5").
+  // The key names below are what the gamelog API returns as of 2026. If ESPN ever splits
+  // these into separate keys, isKickingStatNames() would still match but parseMadeAttempted()
+  // would receive undefined and silently return [0, 0]. Monitor if kicker stats look wrong.
   const fgKey = 'fieldGoalsMade-fieldGoalAttempts';
   const xpKey = 'extraPointsMade-extraPointAttempts';
   if (m[fgKey] === undefined && m.extraPointsMade === undefined) return null;
