@@ -1,6 +1,11 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { getPool } from '../../shared/db';
-import { getPlayerStats } from '../../shared/db/queries/statsQueries';
+import {
+  getPassingStats,
+  getRushingStats,
+  getReceivingStats,
+  getKickingStats,
+} from '../../shared/db/queries/statsQueries';
 import { success, badRequest } from '../../shared/middleware/response';
 import { withErrorHandler } from '../../shared/middleware/errorHandler';
 import { parseIntParam, ValidationError } from '../../shared/middleware/validation';
@@ -23,20 +28,64 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
   }
 
   const pool = getPool();
-  const stats = await getPlayerStats(pool, { playerId, season, week });
+  const queryParams = { playerId, season, week };
+
+  const [passing, rushing, receiving, kicking] = await Promise.all([
+    getPassingStats(pool, queryParams),
+    getRushingStats(pool, queryParams),
+    getReceivingStats(pool, queryParams),
+    getKickingStats(pool, queryParams),
+  ]);
 
   return success({
     playerId,
-    stats: stats.map((s) => ({
+    passing: passing.map((s) => ({
       season: s.season,
       week: s.week,
       teamAbbr: s.team_abbr,
-      gamesPlayed: s.games_played,
-      totalPoints: s.total_points,
-      projectedPoints: s.projected_points,
-      statDetails: s.stat_details,
+      attempts: s.attempts,
+      completions: s.completions,
+      yards: s.yards,
+      touchdowns: s.touchdowns,
+      interceptions: s.interceptions,
+      sacks: s.sacks,
+      longest: s.longest,
+      qbRating: s.qb_rating ? parseFloat(s.qb_rating) : null,
+      adjQbr: s.adj_qbr ? parseFloat(s.adj_qbr) : null,
     })),
-    count: stats.length,
+    rushing: rushing.map((s) => ({
+      season: s.season,
+      week: s.week,
+      teamAbbr: s.team_abbr,
+      attempts: s.attempts,
+      yards: s.yards,
+      touchdowns: s.touchdowns,
+      longest: s.longest,
+      fumbles: s.fumbles,
+      fumblesLost: s.fumbles_lost,
+    })),
+    receiving: receiving.map((s) => ({
+      season: s.season,
+      week: s.week,
+      teamAbbr: s.team_abbr,
+      targets: s.targets,
+      receptions: s.receptions,
+      yards: s.yards,
+      touchdowns: s.touchdowns,
+      longest: s.longest,
+    })),
+    kicking: kicking.map((s) => ({
+      season: s.season,
+      week: s.week,
+      teamAbbr: s.team_abbr,
+      fgMade: s.fg_made,
+      fgAttempted: s.fg_attempted,
+      fgLong: s.fg_long,
+      fgPct: s.fg_pct ? parseFloat(s.fg_pct) : null,
+      xpMade: s.xp_made,
+      xpAttempted: s.xp_attempted,
+      points: s.points,
+    })),
   });
 }
 

@@ -9,7 +9,7 @@ const POSITION_MAP: Record<string, string> = {
   'Tight End': 'TE',
   'Place Kicker': 'K',
   'Kicker': 'K',
-  'Punter': 'K',
+  'Punter': 'P',
   'Defensive End': 'DEF',
   'Defensive Tackle': 'DEF',
   'Linebacker': 'DEF',
@@ -68,10 +68,12 @@ async function fetchJson(url: string): Promise<unknown> {
 }
 
 function mapPosition(positionName: string, abbreviation?: string): string {
-  if (abbreviation && ['QB', 'RB', 'WR', 'TE', 'K'].includes(abbreviation)) {
+  const mapped = POSITION_MAP[positionName];
+  if (mapped) return mapped;
+  if (abbreviation && ['QB', 'RB', 'WR', 'TE', 'K', 'P'].includes(abbreviation)) {
     return abbreviation;
   }
-  return POSITION_MAP[positionName] || abbreviation || 'DEF';
+  return abbreviation || 'DEF';
 }
 
 export async function fetchTeams(): Promise<EspnTeam[]> {
@@ -198,6 +200,92 @@ export async function fetchPlayerGamelog(
     names,
     games,
     totals,
+  };
+}
+
+export interface BoxscorePlayer {
+  espnId: string;
+  displayName: string;
+  teamAbbr: string;
+  headshotUrl?: string;
+}
+
+/**
+ * Fetch all players who appeared in a game's boxscore.
+ * Used to discover historical players who aren't on current rosters.
+ */
+export async function fetchGameSummaryPlayers(eventId: string): Promise<BoxscorePlayer[]> {
+  let data: Record<string, unknown>;
+  try {
+    data = (await fetchJson(`${ESPN_V2}/summary?event=${eventId}`)) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  const boxscore = data.boxscore as { players?: Array<Record<string, unknown>> } | undefined;
+  if (!boxscore?.players) return [];
+
+  const seen = new Set<string>();
+  const result: BoxscorePlayer[] = [];
+
+  for (const teamGroup of boxscore.players) {
+    const teamAbbr = (teamGroup.team as Record<string, string>)?.abbreviation ?? '';
+    const statGroups = (teamGroup.statistics ?? []) as Array<{
+      athletes?: Array<{ athlete: Record<string, unknown> }>;
+    }>;
+
+    for (const sg of statGroups) {
+      for (const entry of sg.athletes ?? []) {
+        const a = entry.athlete;
+        const id = String(a.id ?? '');
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+
+        const headshot = a.headshot as Record<string, string> | undefined;
+        result.push({
+          espnId: id,
+          displayName: (a.displayName as string) ?? '',
+          teamAbbr,
+          headshotUrl: headshot?.href ?? `https://a.espncdn.com/i/headshots/nfl/players/full/${id}.png`,
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+const ESPN_CORE = 'https://sports.core.api.espn.com/v2/sports/football/leagues/nfl';
+
+/**
+ * Fetch full player profile from the ESPN core API.
+ * Returns enough data to populate the players table.
+ */
+export async function fetchPlayerProfile(espnPlayerId: string): Promise<EspnPlayer | null> {
+  let data: Record<string, unknown>;
+  try {
+    data = (await fetchJson(`${ESPN_CORE}/athletes/${espnPlayerId}`)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const pos = data.position as Record<string, string> | undefined;
+  const posName = pos?.displayName ?? '';
+  const posAbbr = pos?.abbreviation ?? '';
+
+  return {
+    espnId: String(data.id ?? espnPlayerId),
+    fullName: (data.fullName as string) ?? (data.displayName as string) ?? '',
+    position: posName,
+    positionAbbr: mapPosition(posName, posAbbr),
+    teamAbbr: '',
+    dateOfBirth: (data.dateOfBirth as string) ?? undefined,
+    heightInches: typeof data.height === 'number' ? Math.round(data.height) : undefined,
+    weightLbs: typeof data.weight === 'number' ? Math.round(data.weight) : undefined,
+    college: undefined,
+    headshotUrl: typeof data.headshot === 'object' && data.headshot
+      ? (data.headshot as Record<string, string>).href
+      : `https://a.espncdn.com/i/headshots/nfl/players/full/${espnPlayerId}.png`,
   };
 }
 

@@ -7,6 +7,8 @@ import {
   delay,
   type EspnGameStat,
 } from '../../shared/external-api/client';
+import { parseGameStats } from '../../shared/stat-parser';
+import { upsertGameStats } from '../../shared/db/writes/statWrites';
 
 const API_DELAY_MS = 300;
 
@@ -226,17 +228,14 @@ export async function handler(event: ScheduledEvent): Promise<void> {
 
           for (const game of gamesToWrite) {
             const gameTeam = game.teamAbbr || team.abbreviation || 'UNK';
-            await db.query(
-              `INSERT INTO player_stats (player_id, team_abbr, season, week, event_id, games_played, total_points, stat_details)
-               VALUES ($1, $2, $3, $4, $5, 1, 0, $6)
-               ON CONFLICT (player_id, season, week) DO UPDATE SET
-                 team_abbr = EXCLUDED.team_abbr,
-                 event_id = EXCLUDED.event_id,
-                 stat_details = EXCLUDED.stat_details,
-                 updated_at = NOW()`,
-              [playerId, gameTeam, season, game.week, game.eventId, JSON.stringify(game.stats)],
-            );
-            statsInserted++;
+            const parsed = parseGameStats(gamelog.names, Object.values(game.stats), {
+              playerId,
+              season,
+              week: game.week,
+              teamAbbr: gameTeam,
+              eventId: game.eventId,
+            });
+            statsInserted += await upsertGameStats(db, parsed);
           }
 
           await db.query('COMMIT');
