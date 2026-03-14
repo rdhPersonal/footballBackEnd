@@ -30,9 +30,27 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
   }
 
   const pool = getPool();
-  const players = await searchPlayers(pool, { position, team, season, search, limit, offset });
+  const { players, totalCount } = await searchPlayers(pool, { position, team, season, search, limit, offset });
 
-  return success({ players, count: players.length, limit, offset });
+  return success({
+    players: players.map((p) => ({
+      id: p.id,
+      externalId: p.external_id,
+      name: p.name,
+      position: p.position,
+      photoUrl: p.photo_url,
+      dateOfBirth: p.date_of_birth,
+      college: p.college,
+      heightInches: p.height_inches,
+      weightLbs: p.weight_lbs,
+      currentTeamAbbr: p.current_team_abbr,
+      rosterStatus: p.roster_status,
+    })),
+    totalCount,
+    count: players.length,
+    limit,
+    offset,
+  });
 }
 
 export const handler = withErrorHandler(handle);

@@ -5,10 +5,14 @@ import {
   fetchTeams,
   fetchTeamRoster,
   fetchPlayerGamelog,
+  fetchGameSummaryPlayers,
+  fetchPlayerProfile,
   delay,
   type EspnPlayer,
 } from '../src/shared/external-api/client';
 import { deriveRosterStintsFromGames } from '../src/shared/roster-stints';
+import { parseGameStats } from '../src/shared/stat-parser';
+import { upsertGameStats } from '../src/shared/db/writes/statWrites';
 
 const LOCAL_PORT = 15432;
 const API_DELAY_MS = 300;
@@ -265,14 +269,18 @@ async function upsertPlayer(db: Client, player: EspnPlayer): Promise<string> {
   return result.rows[0].id;
 }
 
+const STAT_TABLES = ['passing_stats', 'rushing_stats', 'receiving_stats', 'kicking_stats'] as const;
+
 async function cleanSeasonData(db: Client, season: number, weekStart: number, weekEnd: number) {
   console.log(`Cleaning existing data for season ${season}, weeks ${weekStart}-${weekEnd}...`);
 
-  const statsResult = await db.query(
-    'DELETE FROM player_stats WHERE season = $1 AND week >= $2 AND week <= $3',
-    [season, weekStart, weekEnd],
-  );
-  console.log(`  Deleted ${statsResult.rowCount} player_stats rows`);
+  for (const table of STAT_TABLES) {
+    const result = await db.query(
+      `DELETE FROM ${table} WHERE season = $1 AND week >= $2 AND week <= $3`,
+      [season, weekStart, weekEnd],
+    );
+    console.log(`  Deleted ${result.rowCount} ${table} rows`);
+  }
 
   const rostersResult = await db.query(
     'DELETE FROM team_rosters WHERE season = $1 AND week_start <= $3 AND COALESCE(week_end, 18) >= $2',
@@ -316,7 +324,7 @@ async function loadSeason() {
     await upsertTeams(db, teamData, cliArgs.season);
     console.log(`Teams upserted for season ${cliArgs.season}\n`);
 
-    console.log('=== Step 2: Fetching rosters and discovering players ===');
+    console.log('=== Step 2: Fetching current rosters to seed player discovery ===');
     const playerIndex = new Map<string, { player: EspnPlayer; dbId: string }>();
     const playerTeams = new Map<string, string>();
 
@@ -325,7 +333,7 @@ async function loadSeason() {
       await delay(API_DELAY_MS);
 
       try {
-        const roster = await fetchTeamRoster(team.espnId, cliArgs.season);
+        const roster = await fetchTeamRoster(team.espnId);
         let newCount = 0;
 
         for (const player of roster) {
@@ -343,17 +351,77 @@ async function loadSeason() {
       }
     }
 
-    console.log(`\nTotal unique players discovered: ${playerIndex.size}\n`);
+    console.log(`\nPlayers from current rosters: ${playerIndex.size}\n`);
 
-    console.log('=== Step 3: Fetching gamelogs (filtered to specified weeks) ===');
+    const allEventIds = new Set<string>();
+    let statsInserted = 0;
+    const failures: Array<{ player: string; espnId: string; error: string }> = [];
+
+    async function loadPlayerGamelog(
+      espnId: string,
+      dbId: string,
+      teamAbbr: string,
+    ): Promise<number> {
+      const gamelog = await fetchPlayerGamelog(espnId, cliArgs.season);
+      if (!gamelog || gamelog.games.length === 0) return 0;
+
+      const filteredGames = gamelog.games
+        .filter((g) => g.week >= cliArgs.weekStart && g.week <= cliArgs.weekEnd)
+        .sort((a, b) => a.week - b.week);
+
+      if (filteredGames.length === 0) return 0;
+
+      for (const g of filteredGames) {
+        allEventIds.add(g.eventId);
+      }
+
+      const derivedStints = deriveRosterStintsFromGames(filteredGames, teamAbbr);
+      let inserted = 0;
+
+      await db.query('BEGIN');
+      try {
+        for (const stint of derivedStints) {
+          await db.query(
+            `INSERT INTO team_rosters (player_id, team_abbr, season, week_start, week_end, roster_status, transaction_type)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (player_id, season, week_start) DO UPDATE SET
+               team_abbr = EXCLUDED.team_abbr,
+               week_end = GREATEST(team_rosters.week_end, EXCLUDED.week_end),
+               roster_status = EXCLUDED.roster_status,
+               transaction_type = EXCLUDED.transaction_type`,
+            [dbId, stint.teamAbbr, cliArgs.season, stint.weekStart, stint.weekEnd, stint.rosterStatus, stint.transactionType],
+          );
+        }
+
+        for (const game of filteredGames) {
+          const gameTeam = game.teamAbbr || teamAbbr || 'UNK';
+          const parsed = parseGameStats(gamelog.names, Object.values(game.stats), {
+            playerId: dbId,
+            season: cliArgs.season,
+            week: game.week,
+            teamAbbr: gameTeam,
+            eventId: game.eventId,
+          });
+          inserted += await upsertGameStats(db, parsed);
+        }
+
+        await db.query('COMMIT');
+      } catch (txErr) {
+        await db.query('ROLLBACK');
+        throw txErr;
+      }
+
+      return inserted;
+    }
+
+    console.log('=== Step 3: Fetching gamelogs for current-roster players ===');
+    const skillPositions = ['QB', 'RB', 'WR', 'TE', 'K'];
     const skillPlayers = [...playerIndex.values()].filter((p) =>
-      ['QB', 'RB', 'WR', 'TE', 'K'].includes(p.player.positionAbbr),
+      skillPositions.includes(p.player.positionAbbr),
     );
     console.log(`Processing ${skillPlayers.length} skill-position players for weeks ${cliArgs.weekStart}-${cliArgs.weekEnd}.\n`);
 
     let processed = 0;
-    let statsInserted = 0;
-    const failures: Array<{ player: string; espnId: string; error: string }> = [];
 
     for (const { player, dbId } of skillPlayers) {
       processed++;
@@ -362,56 +430,10 @@ async function loadSeason() {
       }
 
       const teamAbbr = playerTeams.get(player.espnId) ?? 'UNK';
-
       await delay(API_DELAY_MS);
 
       try {
-        const gamelog = await fetchPlayerGamelog(player.espnId, cliArgs.season);
-        if (!gamelog || gamelog.games.length === 0) continue;
-
-        const filteredGames = gamelog.games
-          .filter((g) => g.week >= cliArgs.weekStart && g.week <= cliArgs.weekEnd)
-          .sort((a, b) => a.week - b.week);
-
-        if (filteredGames.length === 0) continue;
-
-        const derivedStints = deriveRosterStintsFromGames(filteredGames, teamAbbr);
-
-        await db.query('BEGIN');
-        try {
-          for (const stint of derivedStints) {
-            await db.query(
-              `INSERT INTO team_rosters (player_id, team_abbr, season, week_start, week_end, roster_status, transaction_type)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)
-               ON CONFLICT (player_id, season, week_start) DO UPDATE SET
-                 team_abbr = EXCLUDED.team_abbr,
-                 week_end = GREATEST(team_rosters.week_end, EXCLUDED.week_end),
-                 roster_status = EXCLUDED.roster_status,
-                 transaction_type = EXCLUDED.transaction_type`,
-              [dbId, stint.teamAbbr, cliArgs.season, stint.weekStart, stint.weekEnd, stint.rosterStatus, stint.transactionType],
-            );
-          }
-
-          for (const game of filteredGames) {
-            const gameTeam = game.teamAbbr || teamAbbr || 'UNK';
-            await db.query(
-              `INSERT INTO player_stats (player_id, team_abbr, season, week, event_id, games_played, total_points, stat_details)
-               VALUES ($1, $2, $3, $4, $5, 1, 0, $6)
-               ON CONFLICT (player_id, season, week) DO UPDATE SET
-                 team_abbr = EXCLUDED.team_abbr,
-                 event_id = EXCLUDED.event_id,
-                 stat_details = EXCLUDED.stat_details,
-                 updated_at = NOW()`,
-              [dbId, gameTeam, cliArgs.season, game.week, game.eventId, JSON.stringify(game.stats)],
-            );
-            statsInserted++;
-          }
-
-          await db.query('COMMIT');
-        } catch (txErr) {
-          await db.query('ROLLBACK');
-          throw txErr;
-        }
+        statsInserted += await loadPlayerGamelog(player.espnId, dbId, teamAbbr);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         failures.push({ player: player.fullName, espnId: player.espnId, error: errorMsg });
@@ -419,11 +441,110 @@ async function loadSeason() {
       }
     }
 
-    console.log(`\nLoad complete!`);
+    console.log(`\nAfter current-roster pass: ${statsInserted} stat rows, ${allEventIds.size} unique game events\n`);
+
+    console.log('=== Step 4a: Scanning game boxscores to collect unknown player IDs ===');
+    const eventList = [...allEventIds];
+    // Map from ESPN ID -> the team abbr seen in the boxscore (used for the profile pass).
+    const unknownPlayerMap = new Map<string, string>();
+    let eventsScanned = 0;
+
+    for (const eventId of eventList) {
+      eventsScanned++;
+      if (eventsScanned % 25 === 0 || eventsScanned === eventList.length) {
+        console.log(`  Events scanned: ${eventsScanned}/${eventList.length} (${unknownPlayerMap.size} unknown players collected)`);
+      }
+
+      await delay(API_DELAY_MS);
+      try {
+        const boxscorePlayers = await fetchGameSummaryPlayers(eventId);
+        for (const bp of boxscorePlayers) {
+          if (!playerIndex.has(bp.espnId) && !unknownPlayerMap.has(bp.espnId)) {
+            unknownPlayerMap.set(bp.espnId, bp.teamAbbr);
+          }
+        }
+      } catch (err) {
+        console.error(`  [WARN] Failed scanning event ${eventId}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    console.log(`\nFound ${unknownPlayerMap.size} unknown players across ${eventsScanned} events.`);
+
+    console.log('\n=== Step 4b: Fetching profiles for unknown players ===');
+    let newPlayersFound = 0;
+    let profilesAttempted = 0;
+    const newPlayerQueue: Array<{ espnId: string; teamAbbr: string }> = [];
+
+    for (const [espnId, teamAbbr] of unknownPlayerMap) {
+      profilesAttempted++;
+      if (profilesAttempted % 50 === 0 || profilesAttempted === unknownPlayerMap.size) {
+        console.log(`  Profiles fetched: ${profilesAttempted}/${unknownPlayerMap.size} (${newPlayersFound} inserted)`);
+      }
+
+      await delay(API_DELAY_MS);
+      try {
+        const profile = await fetchPlayerProfile(espnId);
+
+        if (!profile) {
+          // Profile unavailable — mark as a placeholder so we don't re-attempt this player.
+          playerIndex.set(espnId, {
+            player: { espnId, fullName: '', position: '', positionAbbr: 'DEF', teamAbbr, headshotUrl: undefined },
+            dbId: '',
+          });
+          continue;
+        }
+
+        profile.teamAbbr = teamAbbr;
+        const dbId = await upsertPlayer(db, profile);
+        playerIndex.set(espnId, { player: profile, dbId });
+        playerTeams.set(espnId, teamAbbr);
+        newPlayersFound++;
+
+        if (skillPositions.includes(profile.positionAbbr)) {
+          newPlayerQueue.push({ espnId, teamAbbr });
+        }
+      } catch (err) {
+        console.error(`  [WARN] Failed profile fetch for ${espnId}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    console.log(`\nDiscovered ${newPlayersFound} historical players from ${eventsScanned} game events.`);
+    console.log(`${newPlayerQueue.length} skill-position players queued for gamelog fetch.\n`);
+
+    if (newPlayerQueue.length > 0) {
+      console.log('=== Step 5: Fetching gamelogs for newly discovered players ===');
+      let histProcessed = 0;
+      let histStats = 0;
+
+      for (const { espnId, teamAbbr } of newPlayerQueue) {
+        histProcessed++;
+        const entry = playerIndex.get(espnId);
+        if (!entry || !entry.dbId) continue;
+
+        if (histProcessed % 25 === 0 || histProcessed === newPlayerQueue.length) {
+          console.log(`  Progress: ${histProcessed}/${newPlayerQueue.length} (${histStats} stat rows)`);
+        }
+
+        await delay(API_DELAY_MS);
+        try {
+          histStats += await loadPlayerGamelog(espnId, entry.dbId, teamAbbr);
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          failures.push({ player: entry.player.fullName, espnId, error: errorMsg });
+          console.error(`  [WARN] Failed: ${entry.player.fullName} (${espnId}): ${errorMsg}`);
+        }
+      }
+
+      statsInserted += histStats;
+      console.log(`\nHistorical player pass: ${histStats} additional stat rows.\n`);
+    }
+
+    console.log('=== Load complete! ===');
     console.log(`  Season: ${cliArgs.season}`);
     console.log(`  Weeks: ${cliArgs.weekStart}-${cliArgs.weekEnd}`);
-    console.log(`  Players discovered: ${playerIndex.size}`);
-    console.log(`  Stat rows inserted: ${statsInserted}`);
+    console.log(`  Players from current rosters: ${skillPlayers.length}`);
+    console.log(`  Historical players discovered: ${newPlayersFound}`);
+    console.log(`  Total stat rows inserted: ${statsInserted}`);
 
     if (failures.length > 0) {
       console.warn(`\n${failures.length} failure(s):`);
@@ -433,10 +554,6 @@ async function loadSeason() {
     }
 
     const teamCount = await db.query('SELECT COUNT(*) FROM nfl_teams WHERE season = $1', [cliArgs.season]);
-    const statsCount = await db.query(
-      'SELECT COUNT(*) FROM player_stats WHERE season = $1 AND week >= $2 AND week <= $3',
-      [cliArgs.season, cliArgs.weekStart, cliArgs.weekEnd],
-    );
     const rosterCount = await db.query(
       'SELECT COUNT(*) FROM team_rosters WHERE season = $1 AND week_start <= $3 AND COALESCE(week_end, 18) >= $2',
       [cliArgs.season, cliArgs.weekStart, cliArgs.weekEnd],
@@ -447,7 +564,14 @@ async function loadSeason() {
     console.log(`  nfl_teams (${cliArgs.season}):  ${teamCount.rows[0].count}`);
     console.log(`  players (all):                   ${playerCount.rows[0].count}`);
     console.log(`  team_rosters (weeks ${cliArgs.weekStart}-${cliArgs.weekEnd}): ${rosterCount.rows[0].count}`);
-    console.log(`  player_stats (weeks ${cliArgs.weekStart}-${cliArgs.weekEnd}): ${statsCount.rows[0].count}`);
+
+    for (const table of STAT_TABLES) {
+      const ct = await db.query(
+        `SELECT COUNT(*) FROM ${table} WHERE season = $1 AND week >= $2 AND week <= $3`,
+        [cliArgs.season, cliArgs.weekStart, cliArgs.weekEnd],
+      );
+      console.log(`  ${table} (weeks ${cliArgs.weekStart}-${cliArgs.weekEnd}): ${ct.rows[0].count}`);
+    }
 
     await db.end();
   } finally {

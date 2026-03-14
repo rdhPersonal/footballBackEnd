@@ -3,6 +3,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as net from 'net';
 
 const LOCAL_PORT = 15432;
+const STAT_TABLES = ['passing_stats', 'rushing_stats', 'receiving_stats', 'kicking_stats'] as const;
 
 interface CliArgs {
   season: number;
@@ -202,12 +203,16 @@ function weekLabel(args: CliArgs): string {
 async function previewCounts(db: Client, args: CliArgs) {
   const weekFilter = args.weekStart !== null;
 
-  const statsCount = await db.query(
-    weekFilter
-      ? 'SELECT COUNT(*) FROM player_stats WHERE season = $1 AND week >= $2 AND week <= $3'
-      : 'SELECT COUNT(*) FROM player_stats WHERE season = $1',
-    weekFilter ? [args.season, args.weekStart, args.weekEnd] : [args.season],
-  );
+  const statCounts: Record<string, number> = {};
+  for (const table of STAT_TABLES) {
+    const result = await db.query(
+      weekFilter
+        ? `SELECT COUNT(*) FROM ${table} WHERE season = $1 AND week >= $2 AND week <= $3`
+        : `SELECT COUNT(*) FROM ${table} WHERE season = $1`,
+      weekFilter ? [args.season, args.weekStart, args.weekEnd] : [args.season],
+    );
+    statCounts[table] = parseInt(result.rows[0].count, 10);
+  }
 
   const rosterCount = await db.query(
     weekFilter
@@ -223,15 +228,18 @@ async function previewCounts(db: Client, args: CliArgs) {
 
   let orphanCount = { rows: [{ count: '0' }] };
   if (args.includePlayers) {
+    const statExistsClauses = STAT_TABLES
+      .map((t) => `NOT EXISTS (SELECT 1 FROM ${t} s WHERE s.player_id = p.id)`)
+      .join(' AND ');
     orphanCount = await db.query(`
       SELECT COUNT(*) FROM players p
-      WHERE NOT EXISTS (SELECT 1 FROM player_stats ps WHERE ps.player_id = p.id)
+      WHERE ${statExistsClauses}
         AND NOT EXISTS (SELECT 1 FROM team_rosters tr WHERE tr.player_id = p.id)
     `);
   }
 
   return {
-    stats: parseInt(statsCount.rows[0].count, 10),
+    statCounts,
     rosters: parseInt(rosterCount.rows[0].count, 10),
     teams: parseInt(teamCount.rows[0].count, 10),
     orphanedPlayers: parseInt(orphanCount.rows[0].count, 10),
@@ -266,12 +274,15 @@ async function clearSeason() {
 
     const counts = await previewCounts(db, args);
     console.log('Rows to be deleted:');
-    console.log(`  player_stats:  ${counts.stats}`);
+    for (const [table, ct] of Object.entries(counts.statCounts)) {
+      console.log(`  ${table}: ${ct}`);
+    }
     console.log(`  team_rosters:  ${counts.rosters}`);
     if (args.includeTeams) console.log(`  nfl_teams:     ${counts.teams}`);
     if (args.includePlayers) console.log(`  players (orphaned): ${counts.orphanedPlayers}`);
 
-    const total = counts.stats + counts.rosters + counts.teams + counts.orphanedPlayers;
+    const totalStats = Object.values(counts.statCounts).reduce((a, b) => a + b, 0);
+    const total = totalStats + counts.rosters + counts.teams + counts.orphanedPlayers;
     if (total === 0) {
       console.log('\nNothing to delete.');
       await db.end();
@@ -289,13 +300,15 @@ async function clearSeason() {
 
     await db.query('BEGIN');
     try {
-      const statsResult = await db.query(
-        weekFilter
-          ? 'DELETE FROM player_stats WHERE season = $1 AND week >= $2 AND week <= $3'
-          : 'DELETE FROM player_stats WHERE season = $1',
-        weekFilter ? [args.season, args.weekStart, args.weekEnd] : [args.season],
-      );
-      console.log(`  player_stats:  ${statsResult.rowCount} deleted`);
+      for (const table of STAT_TABLES) {
+        const result = await db.query(
+          weekFilter
+            ? `DELETE FROM ${table} WHERE season = $1 AND week >= $2 AND week <= $3`
+            : `DELETE FROM ${table} WHERE season = $1`,
+          weekFilter ? [args.season, args.weekStart, args.weekEnd] : [args.season],
+        );
+        console.log(`  ${table}: ${result.rowCount} deleted`);
+      }
 
       const rostersResult = await db.query(
         weekFilter
@@ -314,9 +327,12 @@ async function clearSeason() {
       }
 
       if (args.includePlayers) {
+        const statExistsClauses = STAT_TABLES
+          .map((t) => `NOT EXISTS (SELECT 1 FROM ${t} s WHERE s.player_id = p.id)`)
+          .join(' AND ');
         const playersResult = await db.query(`
           DELETE FROM players p
-          WHERE NOT EXISTS (SELECT 1 FROM player_stats ps WHERE ps.player_id = p.id)
+          WHERE ${statExistsClauses}
             AND NOT EXISTS (SELECT 1 FROM team_rosters tr WHERE tr.player_id = p.id)
         `);
         console.log(`  players:       ${playersResult.rowCount} orphans deleted`);
@@ -335,14 +351,20 @@ async function clearSeason() {
         (SELECT COUNT(*) FROM nfl_teams) AS teams,
         (SELECT COUNT(*) FROM players) AS players,
         (SELECT COUNT(*) FROM team_rosters) AS rosters,
-        (SELECT COUNT(*) FROM player_stats) AS stats
+        (SELECT COUNT(*) FROM passing_stats) AS passing,
+        (SELECT COUNT(*) FROM rushing_stats) AS rushing,
+        (SELECT COUNT(*) FROM receiving_stats) AS receiving,
+        (SELECT COUNT(*) FROM kicking_stats) AS kicking
     `);
     const r = remaining.rows[0];
     console.log(`\nRemaining in database:`);
-    console.log(`  nfl_teams:     ${r.teams}`);
-    console.log(`  players:       ${r.players}`);
-    console.log(`  team_rosters:  ${r.rosters}`);
-    console.log(`  player_stats:  ${r.stats}`);
+    console.log(`  nfl_teams:       ${r.teams}`);
+    console.log(`  players:         ${r.players}`);
+    console.log(`  team_rosters:    ${r.rosters}`);
+    console.log(`  passing_stats:   ${r.passing}`);
+    console.log(`  rushing_stats:   ${r.rushing}`);
+    console.log(`  receiving_stats: ${r.receiving}`);
+    console.log(`  kicking_stats:   ${r.kicking}`);
 
     await db.end();
   } finally {

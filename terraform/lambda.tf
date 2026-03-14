@@ -44,6 +44,26 @@ locals {
       handler     = "getPlayerRosterHistory.handler"
       description = "Get player roster history"
     }
+    getScoringConfigs = {
+      source_dir  = "scoring/getScoringConfigs"
+      handler     = "getScoringConfigs.handler"
+      description = "List fantasy scoring configurations"
+    }
+    getPlayerScores = {
+      source_dir  = "scoring/getPlayerScores"
+      handler     = "getPlayerScores.handler"
+      description = "Get player fantasy scores by scoring config"
+    }
+    getTeams = {
+      source_dir  = "teams/getTeams"
+      handler     = "getTeams.handler"
+      description = "List NFL teams"
+    }
+    getSeasons = {
+      source_dir  = "meta/getSeasons"
+      handler     = "getSeasons.handler"
+      description = "List available seasons with data summary"
+    }
     syncPlayerData = {
       source_dir  = "data-sync/syncPlayerData"
       handler     = "syncPlayerData.handler"
