@@ -77,6 +77,10 @@ locals {
     "GET /players/{id}"               = "getPlayer"
     "GET /players/{id}/stats"         = "getPlayerStats"
     "GET /players/{id}/roster-history" = "getPlayerRosterHistory"
+    "GET /players/{id}/scores"        = "getPlayerScores"
+    "GET /scoring-configs"            = "getScoringConfigs"
+    "GET /teams"                      = "getTeams"
+    "GET /seasons"                    = "getSeasons"
   }
 }
 
