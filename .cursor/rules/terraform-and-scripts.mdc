@@ -1,0 +1,86 @@
+---
+description: How to run Terraform commands and database scripts in this project. Covers environment setup, secret handling, and common operations.
+alwaysApply: true
+---
+
+# Terraform & Script Operations
+
+## Secret sources
+
+All secrets live in two places — never in tracked files:
+
+| Secret | Env var | Source |
+|--------|---------|--------|
+| DB password | `TF_VAR_db_password` / `DB_PASSWORD` | `.env.terraform` (sourced manually) |
+| Bastion SSH CIDR | `TF_VAR_bastion_ssh_cidr` | `.env.terraform` (auto-detects current IP via `curl -s4 ifconfig.me`) |
+| Bastion IP | `BASTION_IP` | Terraform output or project-context rule (`52.27.223.210`, may change on instance restart) |
+| RDS hostname | `RDS_HOST` | Terraform output or project-context rule |
+
+The file `terraform/environments/dev.tfvars` contains **redacted placeholders** for `bastion_ssh_cidr` and `db_password`. These placeholders are intentional — **never replace them with real values**.
+
+## Running Terraform
+
+```bash
+# 1. Source secrets (sets TF_VAR_db_password and TF_VAR_bastion_ssh_cidr)
+source .env.terraform
+
+# 2. Use -var flags to override the redacted tfvars values
+terraform -chdir=terraform plan \
+  -var-file=environments/dev.tfvars \
+  -var "bastion_ssh_cidr=$TF_VAR_bastion_ssh_cidr" \
+  -var "db_password=$TF_VAR_db_password"
+
+terraform -chdir=terraform apply \
+  -var-file=environments/dev.tfvars \
+  -var "bastion_ssh_cidr=$TF_VAR_bastion_ssh_cidr" \
+  -var "db_password=$TF_VAR_db_password"
+```
+
+The `-var` flags take highest precedence in Terraform, so they cleanly override the placeholders in dev.tfvars without touching the file.
+
+## Running database scripts
+
+All scripts in `scripts/` that connect to RDS use an SSH tunnel through the bastion. They read connection details from environment variables:
+
+```bash
+BASTION_IP=52.27.223.210 \
+RDS_HOST=football-backend-dev-db.cwrqrc8xrxdy.us-west-2.rds.amazonaws.com \
+DB_PASSWORD=<password from .env.terraform> \
+npx tsx scripts/<script>.ts [args]
+```
+
+### Common script commands
+
+```bash
+# Check current database state (table counts, migrations)
+BASTION_IP=52.27.223.210 RDS_HOST=football-backend-dev-db.cwrqrc8xrxdy.us-west-2.rds.amazonaws.com DB_PASSWORD="$TF_VAR_db_password" npx tsx scripts/check-db.ts
+
+# Run migrations
+BASTION_IP=52.27.223.210 RDS_HOST=football-backend-dev-db.cwrqrc8xrxdy.us-west-2.rds.amazonaws.com DB_PASSWORD="$TF_VAR_db_password" npx tsx scripts/migrate.ts
+
+# Load a season (e.g. full 2024)
+BASTION_IP=52.27.223.210 RDS_HOST=football-backend-dev-db.cwrqrc8xrxdy.us-west-2.rds.amazonaws.com DB_PASSWORD="$TF_VAR_db_password" npx tsx scripts/load-season.ts --season 2024 --full-season
+
+# Clear a season (dry run first)
+BASTION_IP=52.27.223.210 RDS_HOST=football-backend-dev-db.cwrqrc8xrxdy.us-west-2.rds.amazonaws.com DB_PASSWORD="$TF_VAR_db_password" npx tsx scripts/clear-season.ts --season 2024 --dry-run
+```
+
+Tip: source `.env.terraform` first, then reference `$TF_VAR_db_password` in the DB_PASSWORD position to avoid pasting the raw password on the command line.
+
+## Updating bastion access when IP changes
+
+If SSH to the bastion times out, your public IP likely changed. Fix it without editing dev.tfvars:
+
+```bash
+source .env.terraform
+terraform -chdir=terraform apply \
+  -var-file=environments/dev.tfvars \
+  -var "bastion_ssh_cidr=$TF_VAR_bastion_ssh_cidr" \
+  -var "db_password=$TF_VAR_db_password" \
+  -target=aws_security_group.bastion \
+  -auto-approve
+```
+
+## SSH key
+
+The bastion key is at `~/.ssh/football-bastion.pem`. Scripts reference it automatically.

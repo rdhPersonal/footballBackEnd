@@ -6,7 +6,7 @@ alwaysApply: true
 
 # footballBackEnd -- Project Context
 
-This document captures the full state of the footballBackEnd project as of March 1, 2026. Read this before making any changes.
+This document captures the full state of the footballBackEnd project as of March 13, 2026. Read this before making any changes.
 
 ## What This Project Is
 
@@ -35,6 +35,10 @@ The application scope is **NFL player statistics for the 2023-2025 seasons**. No
                                      |   - getPlayerStats  GET /players/{id}/stats
                                      |   - getPlayerRosterHistory               |
                                      |                     GET /players/{id}/roster-history
+                                     |   - getPlayerScores GET /players/{id}/scores
+                                     |   - getScoringConfigs GET /scoring-configs
+                                     |   - getTeams        GET /teams           |
+                                     |   - getSeasons      GET /seasons         |
                                      |       |                                  |
                                      |       v                                  |
                                      |   RDS PostgreSQL (private subnet)        |
@@ -64,25 +68,63 @@ The application scope is **NFL player statistics for the 2023-2025 seasons**. No
 
 PostgreSQL 16.12 on RDS (`db.t4g.micro`). Database name: `football`. User: `footballadmin`.
 
-4 tables defined in `src/migrations/`:
+7 migrations applied (in `src/migrations/`). The schema evolved from a single JSONB `player_stats` table (migrations 004-005, now dropped) to strongly-typed per-category stat tables (migration 006).
 
 ### nfl_teams
 Team reference data, one row per team per season. Unique on `(abbr, season)`. Includes `conference`, `division`, `bye_week`.
 
 ### players
-Team-agnostic player identity. UUID primary key, `external_id` (ESPN ID) unique. Stores `name`, `position`, `photo_url`, `date_of_birth`, `college`, `height_inches`, `weight_lbs`. No team or injury fields here -- those are contextual.
+Team-agnostic player identity. UUID primary key, `external_id` (ESPN ID) unique. Stores `name`, `position`, `photo_url`, `date_of_birth`, `college`, `height_inches`, `weight_lbs`.
 
 ### team_rosters
 Associates players with teams for a season with week-level granularity. Tracks `week_start`, `week_end`, `roster_status` (active, practice_squad, injured_reserve, suspended, pup), and `transaction_type` (drafted, signed, traded, claimed, promoted, demoted, activated, released). Unique on `(player_id, season, week_start)`.
 
-### player_stats
-Per-game weekly statistics. `player_id`, `team_abbr` (denormalized), `season`, `week`, `games_played`, `total_points`, `projected_points`, and `stat_details` JSONB. The JSONB contains raw ESPN stat names like `passingYards`, `rushingTouchdowns`, `completionPct`, `QBRating`, etc. Unique on `(player_id, season, week)`.
+### passing_stats
+Per-game passing: `attempts`, `completions`, `yards`, `touchdowns`, `interceptions`, `sacks`, `longest`, `qb_rating`, `adj_qbr`. Unique on `(player_id, season, week)`.
 
-### Current data volumes (from backfill)
-- `nfl_teams`: 96 rows (32 teams x 3 seasons)
-- `players`: 2,544 rows (all positions from current rosters)
-- `team_rosters`: 1,689 rows (stints for skill-position players)
-- `player_stats`: 20,652 rows (per-game stats for QB/RB/WR/TE/K)
+### rushing_stats
+Per-game rushing: `attempts`, `yards`, `touchdowns`, `longest`, `fumbles`, `fumbles_lost`. Unique on `(player_id, season, week)`.
+
+### receiving_stats
+Per-game receiving: `targets`, `receptions`, `yards`, `touchdowns`, `longest`. Unique on `(player_id, season, week)`.
+
+### kicking_stats
+Per-game kicking: `fg_made`, `fg_attempted`, `fg_long`, `fg_pct`, `xp_made`, `xp_attempted`, `points`. Unique on `(player_id, season, week)`.
+
+All four stat tables share columns: `player_id`, `season`, `week`, `team_abbr`, `event_id`, `created_at`, `updated_at`.
+
+### scoring_configs
+Fantasy scoring rules. Seeded with 3 rows: Standard, Half-PPR, PPR. Defines point values for each stat category.
+
+### Current data volumes (2023 season loaded)
+- `nfl_teams`: 32 rows (2023 only)
+- `players`: 3,077 rows (current-roster players + 560 historical players discovered from game boxscores)
+- `team_rosters`: 2,498 rows
+- `passing_stats`: 540 rows
+- `rushing_stats`: 1,971 rows
+- `receiving_stats`: 3,798 rows
+- `kicking_stats`: 474 rows
+- `scoring_configs`: 3 rows
+- **2024 and 2025 seasons are not yet loaded.**
+
+## ESPN API and Historical Player Discovery
+
+The ESPN roster endpoint (`/teams/{id}/roster?season=YYYY`) only returns players for the **current season**. Historical seasons return 0 players. To load historical data, `load-season.ts` uses a multi-pass approach:
+
+1. **Current roster pass**: Fetch current (2025) rosters to discover active players and their ESPN IDs.
+2. **Gamelog pass**: Fetch each player's gamelog for the target season, collecting event IDs.
+3. **Boxscore discovery pass**: For each event ID, fetch the game summary (`/summary?event={id}`) to discover all participating players -- including those no longer on any roster.
+4. **Profile + gamelog pass**: For each newly discovered player, fetch their full profile from the core API (`sports.core.api.espn.com/v2/.../athletes/{id}`) and their gamelog for the target season.
+
+### ESPN Endpoints Used
+
+| Endpoint | Purpose |
+|----------|---------|
+| `site.api.espn.com/apis/site/v2/sports/football/nfl/teams` | List all 32 teams |
+| `site.api.espn.com/.../teams/{id}/roster` | Current roster (no season param) |
+| `site.api.espn.com/apis/common/v3/.../athletes/{id}/gamelog?season=YYYY` | Player gamelog (works for historical seasons) |
+| `site.api.espn.com/.../summary?event={id}` | Game boxscore with all participating players |
+| `sports.core.api.espn.com/v2/.../athletes/{id}` | Full player profile (name, position, DOB, height, weight, headshot) |
 
 ## Key Files
 
@@ -91,32 +133,40 @@ Per-game weekly statistics. `player_id`, `team_abbr` (denormalized), `season`, `
 |------|---------|
 | `main.tf` | Provider config, S3 backend for state |
 | `variables.tf` | All input variables (VPC, bastion, RDS, Cognito, frontend) |
-| `environments/dev.tfvars` | Dev environment values (contains DB password -- do not commit) |
+| `environments/dev.tfvars` | Dev environment values (**contains redacted placeholders** -- see `terraform-and-scripts.mdc`) |
 | `vpc.tf` | VPC, subnets, NAT, IGW, security groups |
 | `bastion.tf` | EC2 bastion host (Amazon Linux 2023, t3.micro) |
 | `rds.tf` | RDS PostgreSQL instance + parameter group |
 | `iam.tf` | Lambda execution role with basic + VPC policies |
 | `cognito.tf` | User Pool, hosted UI domain, PKCE app client |
-| `lambda.tf` | 5 Lambda functions (for_each pattern), archive_file zips |
-| `api-gateway.tf` | HTTP API, JWT authorizer, 4 routes, Lambda integrations |
+| `lambda.tf` | Lambda functions (for_each pattern), archive_file zips |
+| `api-gateway.tf` | HTTP API, JWT authorizer, routes, Lambda integrations |
 | `eventbridge.tf` | Daily cron schedule for syncPlayerData |
 | `outputs.tf` | Key resource IDs/URLs for all phases |
 
 ### Application Code (all in `src/`)
 | File | Purpose |
 |------|---------|
-| `shared/types/player.ts` | TypeScript interfaces: Player, TeamRoster, PlayerStats, NflTeam |
+| `shared/types/player.ts` | TypeScript interfaces: Player, TeamRoster, stat types, NflTeam |
 | `shared/db/client.ts` | PostgreSQL connection pool (with SSL for RDS) |
 | `shared/db/queries/playerQueries.ts` | searchPlayers (with filters), getPlayerById |
 | `shared/db/queries/rosterQueries.ts` | getPlayerRosterHistory |
 | `shared/db/queries/statsQueries.ts` | getPlayerStats (by season/week) |
+| `shared/db/queries/scoringQueries.ts` | getScoringConfigs, getPlayerScores |
+| `shared/db/writes/statWrites.ts` | Upsert functions for all four stat tables |
 | `shared/middleware/response.ts` | Standardized API responses (success, error, notFound, badRequest) |
 | `shared/middleware/errorHandler.ts` | withErrorHandler HOF for Lambda error wrapping |
-| `shared/external-api/client.ts` | ESPN API client (fetchTeams, fetchTeamRoster, fetchPlayerGamelog) |
+| `shared/external-api/client.ts` | ESPN API client (fetchTeams, fetchTeamRoster, fetchPlayerGamelog, fetchGameSummaryPlayers, fetchPlayerProfile) |
+| `shared/stat-parser.ts` | Parses ESPN gamelog values into typed stat objects |
+| `shared/roster-stints.ts` | Derives roster stints from gamelog presence |
 | `functions/players/getPlayers.ts` | Lambda: GET /players -- search/filter/paginate |
 | `functions/players/getPlayer.ts` | Lambda: GET /players/{id} -- single player with current team |
 | `functions/players/getPlayerStats.ts` | Lambda: GET /players/{id}/stats -- weekly stats |
 | `functions/players/getPlayerRosterHistory.ts` | Lambda: GET /players/{id}/roster-history |
+| `functions/scoring/getScoringConfigs.ts` | Lambda: GET /scoring-configs |
+| `functions/scoring/getPlayerScores.ts` | Lambda: GET /players/{id}/scores |
+| `functions/teams/getTeams.ts` | Lambda: GET /teams -- list/filter NFL teams |
+| `functions/meta/getSeasons.ts` | Lambda: GET /seasons -- available seasons with stat summaries |
 | `functions/data-sync/syncPlayerData.ts` | Lambda: scheduled ESPN sync (current season) |
 
 ### Scripts (all in `scripts/`)
@@ -124,9 +174,10 @@ Per-game weekly statistics. `player_id`, `team_abbr` (denormalized), `season`, `
 |------|---------|
 | `build.ts` | esbuild bundler -- outputs each function to `dist/<group>/<name>/` as CJS (target: node22) |
 | `migrate.ts` | Runs SQL migrations via SSH tunnel through bastion |
-| `backfill.ts` | One-time ESPN data import for 2023-2025 seasons |
-| `load-season.ts` | Incremental data load -- specific season/week ranges with upsert (supports `--week`, `--full-season`, `--clean`) |
+| `backfill.ts` | Legacy one-time import (used the old JSONB schema, now superseded by load-season) |
+| `load-season.ts` | Primary data loader with historical player discovery. Supports `--season`, `--week`, `--week-start`, `--week-end`, `--full-season`, `--clean` |
 | `clear-season.ts` | Delete data for a season or week range (supports `--dry-run`, `--include-teams`, `--include-players`) |
+| `check-db.ts` | Show table counts, scoring configs, and applied migrations |
 | `bootstrap-tf-backend.sh` | Creates S3 bucket + DynamoDB table for Terraform state |
 
 ### Tests (all in `tests/`)
@@ -136,7 +187,7 @@ Per-game weekly statistics. `player_id`, `team_abbr` (denormalized), `season`, `
 | `unit/validation.test.ts` | 15 tests: parseIntParam bounds/error handling |
 | `unit/response.test.ts` | 9 tests: response helpers, CORS headers, status codes |
 | `unit/errorHandler.test.ts` | 3 tests: Lambda error handler wrapper |
-| `integration/api.test.ts` | 26 tests: all 4 API endpoints via live API Gateway + auth + data integrity |
+| `integration/api.test.ts` | 39 tests: all 8 API endpoints via live API Gateway + auth + data integrity |
 | `integration/helpers.ts` | Test utilities: Cognito token acquisition, typed API client |
 
 ## Live Resource Identifiers
@@ -148,7 +199,7 @@ Per-game weekly statistics. `player_id`, `team_abbr` (denormalized), `season`, `
 | Cognito App Client ID | `12hi070g8mrjkefh1pciv624om` |
 | Cognito Domain | `https://football-dev.auth.us-west-2.amazoncognito.com` |
 | RDS Endpoint | `football-backend-dev-db.cwrqrc8xrxdy.us-west-2.rds.amazonaws.com:5432` |
-| Bastion IP | `54.213.11.151` (may change if instance is stopped/started) |
+| Bastion IP | `52.27.223.210` (may change if instance is stopped/started) |
 | VPC ID | `vpc-06e7f187f01f0f8e5` |
 | TF State Bucket | `football-backend-tf-state` (S3, us-west-2) |
 | TF Lock Table | `football-backend-tf-lock` (DynamoDB) |
@@ -166,143 +217,50 @@ The frontend BFF flow (documented in `footballFrontEnd/.cursor/rules/bff.mdc`):
 
 A test user exists: `testuser@football.dev` / `TestPass123!`
 
-To get a token for testing:
-```bash
-aws cognito-idp initiate-auth \
-  --client-id 12hi070g8mrjkefh1pciv624om \
-  --auth-flow USER_PASSWORD_AUTH \
-  --auth-parameters USERNAME=testuser@football.dev,PASSWORD='TestPass123!' \
-  --region us-west-2 \
-  --query 'AuthenticationResult.IdToken' \
-  --output text
-```
+## Build, Deploy, and Operations
 
-Then use it:
-```bash
-curl -H "Authorization: Bearer <token>" \
-  "https://z8y6zlxrmc.execute-api.us-west-2.amazonaws.com/players?limit=5"
-```
+See `.cursor/rules/terraform-and-scripts.mdc` for detailed instructions on running Terraform and database scripts with proper secret handling. Key points:
 
-## Build and Deploy Workflow
-
-```bash
-# 1. Build Lambda bundles (CJS format, one dir per function)
-npm run build
-
-# 2. Plan and apply infrastructure changes
-cd terraform
-terraform plan -var-file=environments/dev.tfvars
-terraform apply -var-file=environments/dev.tfvars
-
-# Lambda code is zipped by Terraform's archive_file data source from dist/
-```
-
-The build produces `dist/<group>/<functionName>/<functionName>.js` (CommonJS). Terraform zips each function directory and uploads it. Lambda runtime is `nodejs22.x`.
+- **Never put real secrets in `dev.tfvars`** -- it contains redacted placeholders. Use `-var` flags with values from `.env.terraform`.
+- **Source `.env.terraform`** before any Terraform or script command.
+- Build produces `dist/<group>/<functionName>/<functionName>.js` (CommonJS). Terraform zips each function directory and uploads it. Lambda runtime is `nodejs22.x`.
 
 ## Known Issues and Quirks
 
-1. **ESM vs CJS**: Lambda Node.js 22 runtime defaults to CommonJS. The build uses `format: 'cjs'` in esbuild. If you ever switch to ESM, you need a `package.json` with `"type": "module"` in each function's zip.
+1. **ESM vs CJS**: Lambda Node.js 22 runtime defaults to CommonJS. The build uses `format: 'cjs'` in esbuild.
 
-2. **RDS SSL**: RDS requires SSL connections. All `pg` clients use `ssl: { rejectUnauthorized: false }`. This is in `src/shared/db/client.ts` (for Lambda queries), `scripts/migrate.ts`, `scripts/backfill.ts`, and `src/functions/data-sync/syncPlayerData.ts`.
+2. **RDS SSL**: All `pg` clients use `ssl: { rejectUnauthorized: false }`.
 
-3. **Bastion IP allowlisting**: The `bastion_ssh_cidr` in `dev.tfvars` must match the developer's current public IP. Residential ISPs change IPs periodically. Update the value and `terraform apply` to restore access.
+3. **Bastion IP allowlisting**: Residential ISPs change IPs. See `terraform-and-scripts.mdc` for update instructions.
 
-4. **ESPN API is unofficial**: The ESPN API endpoints used (`site.api.espn.com`) are not officially documented. They work but could change without notice. The client is in `src/shared/external-api/client.ts`.
+4. **ESPN API is unofficial**: The ESPN endpoints used are not officially documented and could change without notice.
 
-5. **Roster stints are inferred**: The backfill infers team_rosters entries from gamelog presence (which weeks a player had stats). This misses players who were on a roster but never played (e.g., practice squad). The syncPlayerData Lambda does the same.
+5. **Roster stints are inferred**: Derived from gamelog presence (which weeks a player had stats). Misses players who were rostered but never played.
 
-6. **stat_details JSONB is raw ESPN format**: Field names like `passingYards`, `rushingTouchdowns`, `QBRating` come directly from ESPN. These will need to be normalized/extended later for the frontend to consume cleanly.
+6. **Historical roster endpoint is empty**: ESPN's roster endpoint only returns current-season players. Historical player discovery relies on the boxscore crawl in `load-season.ts`.
 
-7. **total_points is always 0**: The backfill doesn't calculate fantasy points -- that's a future feature. The column exists but is populated with 0.
+7. **Cognito ALLOW_USER_PASSWORD_AUTH**: Added for testing convenience. In production, only `ALLOW_USER_SRP_AUTH` and `ALLOW_REFRESH_TOKEN_AUTH` should be enabled.
 
-8. **Cognito ALLOW_USER_PASSWORD_AUTH**: This was added to the app client for testing convenience. In production, only `ALLOW_USER_SRP_AUTH` and `ALLOW_REFRESH_TOKEN_AUTH` should be enabled. The PKCE hosted UI flow doesn't need it.
+## API Response Conventions
+
+All API responses use **camelCase** field names. The `GET /players` endpoint returns `totalCount` (total matching rows across all pages) alongside `count` (rows in the current page), `limit`, and `offset` for pagination.
 
 ## Recommended Next Steps
 
+### Data Loading
+1. **Load 2024 and 2025 seasons**: Run `load-season.ts --season 2024 --full-season` and `--season 2025 --full-season`.
+
 ### Immediate / High Value
-1. **Frontend integration**: Wire up the footballFrontEnd BFF routes to use the live API Gateway URL and Cognito credentials. The env vars needed are documented in the frontend's `bff.mdc`.
+2. **Frontend feature pages**: Build player list, player detail, and stats pages using the existing BFF routes and design system components.
 
-2. **Normalize stat_details**: Create a mapping layer or database migration to convert raw ESPN stat names into a consistent schema. This would make the frontend display logic much simpler.
-
-3. **Calculate total_points**: Implement a fantasy scoring formula (standard, PPR, or configurable) that runs during sync/backfill to populate the `total_points` column.
+3. **Fantasy scoring calculation**: The `scoring_configs` table and query infrastructure exist. Wire scoring into the data sync pipeline so scores are calculated on load.
 
 ### Infrastructure Improvements
-4. **Replace bastion with SSM Session Manager**: Eliminates the IP allowlisting problem entirely. Add an SSM VPC endpoint and IAM instance profile to the bastion.
-
-5. **Secrets Manager for DB password**: The password is currently in `dev.tfvars` (plaintext). Move it to AWS Secrets Manager and reference it from Terraform + Lambda env vars.
-
-6. **CloudWatch alarms**: Add alarms for Lambda errors, API Gateway 5xx rates, and RDS CPU/connections.
-
-7. **CI/CD pipeline**: Automate `npm run build` + `terraform apply` on push to main (GitHub Actions or CodePipeline).
+4. **Replace bastion with SSM Session Manager**: Eliminates IP allowlisting.
+5. **Secrets Manager for DB password**: Move from plaintext env var to AWS Secrets Manager.
+6. **CloudWatch alarms**: Lambda errors, API Gateway 5xx, RDS CPU/connections.
+7. **CI/CD pipeline**: Automate build + deploy on push to main.
 
 ### Data Quality
-8. **Improve roster tracking**: The current roster data is inferred from gamelogs. Consider using additional ESPN endpoints or another data source to get actual roster transactions (trades, IR moves, etc.).
-
-9. **Add defensive team stats**: Currently only individual skill-position players (QB, RB, WR, TE, K) have stats. DEF/ST team stats would require a different ESPN endpoint.
-
-10. **Backfill bye_week on nfl_teams**: The `bye_week` column exists but is NULL for all rows. This data is available from ESPN's schedule endpoints.
-
-## How to Review and Test
-
-### Quick smoke test (all 4 endpoints)
-```bash
-# Get a token
-TOKEN=$(aws cognito-idp initiate-auth \
-  --client-id 12hi070g8mrjkefh1pciv624om \
-  --auth-flow USER_PASSWORD_AUTH \
-  --auth-parameters USERNAME=testuser@football.dev,PASSWORD='TestPass123!' \
-  --region us-west-2 \
-  --query 'AuthenticationResult.IdToken' --output text)
-
-API="https://z8y6zlxrmc.execute-api.us-west-2.amazonaws.com"
-
-# List players
-curl -s -H "Authorization: Bearer $TOKEN" "$API/players?limit=3" | python3 -m json.tool
-
-# Filter by position
-curl -s -H "Authorization: Bearer $TOKEN" "$API/players?position=QB&limit=3" | python3 -m json.tool
-
-# Single player (use any UUID from the list above)
-curl -s -H "Authorization: Bearer $TOKEN" "$API/players/<uuid>" | python3 -m json.tool
-
-# Player stats
-curl -s -H "Authorization: Bearer $TOKEN" "$API/players/<uuid>/stats?season=2024" | python3 -m json.tool
-
-# Roster history
-curl -s -H "Authorization: Bearer $TOKEN" "$API/players/<uuid>/roster-history" | python3 -m json.tool
-
-# Verify auth rejection
-curl -s "$API/players?limit=1"  # Should return 401
-```
-
-### Database inspection (via bastion tunnel)
-```bash
-# Open tunnel (check your IP matches bastion_ssh_cidr first)
-ssh -i ~/.ssh/football-bastion.pem -L 15432:football-backend-dev-db.cwrqrc8xrxdy.us-west-2.rds.amazonaws.com:5432 ec2-user@54.213.11.151 -N &
-
-# Connect
-psql -h localhost -p 15432 -U footballadmin -d football
-
-# Useful queries
-SELECT COUNT(*) FROM players;
-SELECT COUNT(*) FROM player_stats;
-SELECT position, COUNT(*) FROM players GROUP BY position ORDER BY count DESC;
-SELECT season, COUNT(*) FROM player_stats GROUP BY season ORDER BY season;
-SELECT * FROM players WHERE position = 'QB' ORDER BY name LIMIT 10;
-```
-
-### Terraform state check
-```bash
-cd terraform
-terraform plan -var-file=environments/dev.tfvars
-# Should show "No changes" if everything is in sync
-```
-
-### Lambda logs
-```bash
-# Check recent getPlayers invocations
-aws logs tail /aws/lambda/football-backend-dev-getPlayers --since 1h --region us-west-2
-
-# Check sync Lambda
-aws logs tail /aws/lambda/football-backend-dev-syncPlayerData --since 24h --region us-west-2
-```
+8. **Improve roster tracking**: Use additional ESPN endpoints for actual roster transactions.
+9. **Backfill bye_week on nfl_teams**: Data is available from ESPN schedule endpoints.
