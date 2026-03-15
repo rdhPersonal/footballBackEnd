@@ -10,12 +10,12 @@ locals {
   lambda_memory  = 256
 
   lambda_env_vars = {
-    DB_HOST     = aws_db_instance.main.address
-    DB_PORT     = "5432"
-    DB_NAME     = var.db_name
-    DB_USER     = var.db_username
-    DB_PASSWORD = var.db_password
-    NODE_OPTIONS = "--enable-source-maps"
+    DB_HOST                = aws_db_instance.main.address
+    DB_PORT                = "5432"
+    DB_NAME                = var.db_name
+    DB_USER                = var.db_username
+    DB_INSTANCE_IDENTIFIER = aws_db_instance.main.identifier
+    NODE_OPTIONS           = "--enable-source-maps"
   }
 
   lambda_vpc_config = {
@@ -119,5 +119,6 @@ resource "aws_lambda_function" "functions" {
   depends_on = [
     aws_iam_role_policy_attachment.lambda_basic,
     aws_iam_role_policy_attachment.lambda_vpc,
+    aws_iam_role_policy.lambda_db_secret_access,
   ]
 }

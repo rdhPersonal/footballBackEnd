@@ -1,6 +1,7 @@
 import { Client } from 'pg';
 import { spawn } from 'child_process';
 import * as net from 'net';
+import { getAdminDbConfig } from './lib/db-admin-config';
 
 const LOCAL_PORT = 15432;
 
@@ -19,30 +20,23 @@ async function waitForPort(port: number): Promise<void> {
 }
 
 async function main() {
-  const bastionIp = process.env.BASTION_IP;
-  const rdsHost = process.env.RDS_HOST;
-  const dbPassword = process.env.DB_PASSWORD;
-
-  if (!bastionIp || !rdsHost || !dbPassword) {
-    const missing = ['BASTION_IP', 'RDS_HOST', 'DB_PASSWORD'].filter((k) => !process.env[k]);
-    console.error(`Missing required environment variables: ${missing.join(', ')}`);
-    console.error('See .cursor/rules/terraform-and-scripts.mdc for how to set these.');
-    process.exit(1);
-  }
+  const config = await getAdminDbConfig();
 
   const tunnel = spawn('ssh', [
-    '-i', `${process.env.HOME}/.ssh/football-bastion.pem`,
+    '-i', config.bastionKeyPath,
     '-o', 'StrictHostKeyChecking=accept-new', '-N',
-    '-L', `${LOCAL_PORT}:${rdsHost}:5432`,
-    `ec2-user@${bastionIp}`,
+    '-L', `${LOCAL_PORT}:${config.rdsHost}:${config.rdsPort}`,
+    `ec2-user@${config.bastionIp}`,
   ], { stdio: 'pipe' });
 
   try {
     await waitForPort(LOCAL_PORT);
     const db = new Client({
       host: '127.0.0.1', port: LOCAL_PORT,
-      database: 'football', user: 'footballadmin',
-      password: dbPassword, ssl: { rejectUnauthorized: false },
+      database: config.dbName,
+      user: config.dbUser,
+      password: config.dbPassword,
+      ssl: { rejectUnauthorized: false },
     });
     await db.connect();
 

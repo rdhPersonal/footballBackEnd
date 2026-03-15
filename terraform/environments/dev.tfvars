@@ -1,5 +1,5 @@
-environment   = "dev"
-aws_region    = "us-west-2"
+environment = "dev"
+aws_region  = "us-west-2"
 
 # Bastion
 # NOTE: bastion_ssh_cidr must be your current public IPv4 address with a /32 mask.
@@ -12,7 +12,6 @@ bastion_instance_type = "t3.micro"
 # RDS (Phase 2)
 db_name           = "football"
 db_username       = "footballadmin"
-db_password       = "***REDACTED_DB_PASSWORD***"
 db_instance_class = "db.t4g.micro"
 
 # Cognito (Phase 4)

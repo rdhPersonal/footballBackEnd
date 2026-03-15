@@ -29,14 +29,14 @@ resource "aws_apigatewayv2_stage" "default" {
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.api_gw.arn
     format = jsonencode({
-      requestId      = "$context.requestId"
-      ip             = "$context.identity.sourceIp"
-      requestTime    = "$context.requestTime"
-      httpMethod     = "$context.httpMethod"
-      routeKey       = "$context.routeKey"
-      status         = "$context.status"
-      protocol       = "$context.protocol"
-      responseLength = "$context.responseLength"
+      requestId        = "$context.requestId"
+      ip               = "$context.identity.sourceIp"
+      requestTime      = "$context.requestTime"
+      httpMethod       = "$context.httpMethod"
+      routeKey         = "$context.routeKey"
+      status           = "$context.status"
+      protocol         = "$context.protocol"
+      responseLength   = "$context.responseLength"
       integrationError = "$context.integrationErrorMessage"
     })
   }
@@ -73,14 +73,14 @@ resource "aws_apigatewayv2_authorizer" "cognito" {
 
 locals {
   api_routes = {
-    "GET /players"                    = "getPlayers"
-    "GET /players/{id}"               = "getPlayer"
-    "GET /players/{id}/stats"         = "getPlayerStats"
+    "GET /players"                     = "getPlayers"
+    "GET /players/{id}"                = "getPlayer"
+    "GET /players/{id}/stats"          = "getPlayerStats"
     "GET /players/{id}/roster-history" = "getPlayerRosterHistory"
-    "GET /players/{id}/scores"        = "getPlayerScores"
-    "GET /scoring-configs"            = "getScoringConfigs"
-    "GET /teams"                      = "getTeams"
-    "GET /seasons"                    = "getSeasons"
+    "GET /players/{id}/scores"         = "getPlayerScores"
+    "GET /scoring-configs"             = "getScoringConfigs"
+    "GET /teams"                       = "getTeams"
+    "GET /seasons"                     = "getSeasons"
   }
 }
 

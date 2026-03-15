@@ -30,7 +30,7 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
     return badRequest('Invalid position. Must be one of: QB, RB, WR, TE, K, DEF');
   }
 
-  const pool = getPool();
+  const pool = await getPool();
   const { players, totalCount } = await searchPlayers(pool, { position, team, season, search, limit, offset });
 
   const body = {

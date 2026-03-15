@@ -12,10 +12,10 @@ resource "aws_db_instance" "main" {
   engine_version = "16.12"
   instance_class = var.db_instance_class
 
-  db_name  = var.db_name
-  username = var.db_username
-  password = var.db_password
-  port     = 5432
+  db_name                     = var.db_name
+  username                    = var.db_username
+  manage_master_user_password = true
+  port                        = 5432
 
   allocated_storage     = 20
   max_allocated_storage = 50
@@ -31,10 +31,10 @@ resource "aws_db_instance" "main" {
   backup_window           = "03:00-04:00"
   maintenance_window      = "sun:04:00-sun:05:00"
 
-  skip_final_snapshot       = true
-  delete_automated_backups  = true
-  deletion_protection       = false
-  apply_immediately         = true
+  skip_final_snapshot      = true
+  delete_automated_backups = true
+  deletion_protection      = false
+  apply_immediately        = true
 
   parameter_group_name = aws_db_parameter_group.main.name
 

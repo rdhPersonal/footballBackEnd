@@ -26,7 +26,7 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
 
   const scoringFormat = params.scoring || 'Standard';
 
-  const pool = getPool();
+  const pool = await getPool();
   const config = await getScoringConfigByName(pool, scoringFormat);
   if (!config) return notFound(`Scoring config '${scoringFormat}' not found`);
 

@@ -13,7 +13,7 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
   const playerId = event.pathParameters?.id;
   if (!playerId) return badRequest('Player ID is required');
 
-  const pool = getPool();
+  const pool = await getPool();
   const history = await getPlayerRosterHistory(pool, playerId);
 
   const body = {

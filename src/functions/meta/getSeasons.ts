@@ -6,7 +6,7 @@ import { success } from '../../shared/middleware/response';
 import { withErrorHandler } from '../../shared/middleware/errorHandler';
 
 async function handle(_event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-  const pool = getPool();
+  const pool = await getPool();
   const seasons = await getSeasonsSummary(pool);
 
   const body = {

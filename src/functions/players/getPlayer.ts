@@ -9,7 +9,7 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
   const id = event.pathParameters?.id;
   if (!id) return badRequest('Player ID is required');
 
-  const pool = getPool();
+  const pool = await getPool();
   const player = await getPlayerById(pool, id);
 
   if (!player) return notFound('Player not found');

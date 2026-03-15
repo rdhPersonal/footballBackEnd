@@ -9,6 +9,7 @@ import {
 } from '../../shared/external-api/client';
 import { parseGameStats } from '../../shared/stat-parser';
 import { upsertGameStats } from '../../shared/db/writes/statWrites';
+import { getDatabaseConnectionConfig } from '../../shared/db/runtime-config';
 
 const API_DELAY_MS = 300;
 
@@ -115,21 +116,15 @@ function getTrailingWeeks(): number {
   return Math.max(val, MIN_TRAILING_WEEKS);
 }
 
-function getDbClient(): Client {
-  return new Client({
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT || '5432', 10),
-    database: process.env.DB_NAME || 'football',
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    ssl: { rejectUnauthorized: false },
-  });
+async function getDbClient(): Promise<Client> {
+  const config = await getDatabaseConnectionConfig();
+  return new Client(config);
 }
 
 export async function handler(event: ScheduledEvent): Promise<void> {
   console.log('syncPlayerData triggered', JSON.stringify(event));
 
-  const db = getDbClient();
+  const db = await getDbClient();
   await db.connect();
 
   try {
