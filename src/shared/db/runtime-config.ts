@@ -17,6 +17,12 @@ type DbInstanceMetadata = {
   username?: string;
 };
 
+type CacheEntry<T> = {
+  key: string;
+  expiresAt: number;
+  value: Promise<T>;
+};
+
 export type DatabaseConnectionConfig = {
   host: string;
   port: number;
@@ -29,21 +35,41 @@ export type DatabaseConnectionConfig = {
 const secretsClient = new SecretsManagerClient({});
 const rdsClient = new RDSClient({});
 
-let dbInstanceMetadataPromise: Promise<DbInstanceMetadata | null> | null = null;
-let dbSecretPromise: Promise<DbSecretPayload | null> | null = null;
+let dbInstanceMetadataCache: CacheEntry<DbInstanceMetadata> | null = null;
+let dbSecretCache: CacheEntry<DbSecretPayload> | null = null;
+
+const DEFAULT_DB_CONFIG_CACHE_TTL_MS = 5 * 60_000;
+
+export function getDatabaseConnectionCacheTtlMs(): number {
+  const configuredTtl = Number.parseInt(process.env.DB_CONFIG_CACHE_TTL_MS ?? '', 10);
+  if (Number.isNaN(configuredTtl) || configuredTtl <= 0) {
+    return DEFAULT_DB_CONFIG_CACHE_TTL_MS;
+  }
+
+  return configuredTtl;
+}
 
 async function getDbInstanceMetadata(): Promise<DbInstanceMetadata | null> {
   const dbInstanceIdentifier = process.env.DB_INSTANCE_IDENTIFIER;
   if (!dbInstanceIdentifier) return null;
 
-  if (!dbInstanceMetadataPromise) {
-    dbInstanceMetadataPromise = loadDbInstanceMetadata(dbInstanceIdentifier).catch((error) => {
-      dbInstanceMetadataPromise = null;
+  if (!isCacheValid(dbInstanceMetadataCache, dbInstanceIdentifier)) {
+    const cacheEntry = createCacheEntry(
+      dbInstanceIdentifier,
+      () => loadDbInstanceMetadata(dbInstanceIdentifier),
+    );
+
+    cacheEntry.value = cacheEntry.value.catch((error) => {
+      if (dbInstanceMetadataCache === cacheEntry) {
+        dbInstanceMetadataCache = null;
+      }
       throw error;
     });
+
+    dbInstanceMetadataCache = cacheEntry;
   }
 
-  return dbInstanceMetadataPromise;
+  return dbInstanceMetadataCache.value;
 }
 
 async function getDbSecretId(): Promise<string | null> {
@@ -82,14 +108,20 @@ async function getDbSecret(): Promise<DbSecretPayload | null> {
   const secretId = await getDbSecretId();
   if (!secretId) return null;
 
-  if (!dbSecretPromise) {
-    dbSecretPromise = loadDbSecret(secretId).catch((error) => {
-      dbSecretPromise = null;
+  if (!isCacheValid(dbSecretCache, secretId)) {
+    const cacheEntry = createCacheEntry(secretId, () => loadDbSecret(secretId));
+
+    cacheEntry.value = cacheEntry.value.catch((error) => {
+      if (dbSecretCache === cacheEntry) {
+        dbSecretCache = null;
+      }
       throw error;
     });
+
+    dbSecretCache = cacheEntry;
   }
 
-  return dbSecretPromise;
+  return dbSecretCache.value;
 }
 
 async function loadDbSecret(secretId: string): Promise<DbSecretPayload> {
@@ -101,7 +133,13 @@ async function loadDbSecret(secretId: string): Promise<DbSecretPayload> {
     throw new Error(`Secret ${secretId} does not contain a SecretString payload`);
   }
 
-  return JSON.parse(response.SecretString) as DbSecretPayload;
+  try {
+    return JSON.parse(response.SecretString) as DbSecretPayload;
+  } catch (error) {
+    throw new Error(
+      `Secret ${secretId} does not contain valid JSON: ${error instanceof Error ? error.message : 'unknown parse error'}`,
+    );
+  }
 }
 
 export async function getDatabaseConnectionConfig(
@@ -131,4 +169,16 @@ export async function getDatabaseConnectionConfig(
     password,
     ssl: { rejectUnauthorized: false },
   };
+}
+
+function createCacheEntry<T>(key: string, loadValue: () => Promise<T>): CacheEntry<T> {
+  return {
+    key,
+    expiresAt: Date.now() + getDatabaseConnectionCacheTtlMs(),
+    value: loadValue(),
+  };
+}
+
+function isCacheValid<T>(cache: CacheEntry<T> | null, key: string): cache is CacheEntry<T> {
+  return cache !== null && cache.key === key && Date.now() < cache.expiresAt;
 }

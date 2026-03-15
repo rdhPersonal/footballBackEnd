@@ -59,6 +59,8 @@ cd terraform
 export DB_SECRET_ARN="$(terraform output -raw db_master_secret_arn)"
 ```
 
+The resolved AWS DB metadata/secret and the shared Postgres pool are cached for 5 minutes by default to balance secret rotation support with cold-start overhead. Override that with `DB_CONFIG_CACHE_TTL_MS` if you need a shorter refresh window for local testing or faster credential rotation pickup.
+
 ## Bastion Host Access
 
 The bastion host is an EC2 instance in the public subnet that provides SSH tunnel access to the RDS database in the private subnet. It is the only way to connect to the database for running migrations, backfills, and ad-hoc queries.

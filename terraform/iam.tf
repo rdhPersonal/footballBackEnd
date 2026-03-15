@@ -46,6 +46,7 @@ data "aws_iam_policy_document" "lambda_db_secret_access" {
     actions = [
       "rds:DescribeDBInstances",
     ]
+    # DescribeDBInstances does not support resource-level restrictions.
     resources = ["*"]
   }
 
