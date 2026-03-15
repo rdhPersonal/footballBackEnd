@@ -18,8 +18,10 @@
     "clear-season": "tsx scripts/clear-season.ts"
   },
   "dependencies": {
-    "pg": "^8.13.0",
-    "@football/api-contract": "*"
+    "@aws-sdk/client-rds": "^3.909.0",
+    "@aws-sdk/client-secrets-manager": "^3.909.0",
+    "@football/api-contract": "*",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.145",

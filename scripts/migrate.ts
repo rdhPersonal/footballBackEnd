@@ -3,49 +3,10 @@ import { Client } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as net from 'net';
+import { getAdminDbConfig, type AdminDbConfig } from './lib/db-admin-config';
 
 const MIGRATIONS_DIR = path.join('src', 'migrations');
 const LOCAL_PORT = 15432;
-
-interface Config {
-  bastionIp: string;
-  bastionKeyPath: string;
-  rdsHost: string;
-  rdsPort: number;
-  dbName: string;
-  dbUser: string;
-  dbPassword: string;
-}
-
-function getConfig(): Config {
-  const bastionIp = process.env.BASTION_IP;
-  const rdsHost = process.env.RDS_HOST;
-  const dbPassword = process.env.DB_PASSWORD;
-
-  if (!bastionIp || !rdsHost || !dbPassword) {
-    console.error('Required environment variables:');
-    console.error('  BASTION_IP   - Public IP of the bastion host');
-    console.error('  RDS_HOST     - RDS endpoint hostname');
-    console.error('  DB_PASSWORD  - Database password');
-    console.error('');
-    console.error('Optional:');
-    console.error('  BASTION_KEY  - Path to SSH key (default: ~/.ssh/football-bastion.pem)');
-    console.error('  DB_NAME      - Database name (default: football)');
-    console.error('  DB_USER      - Database user (default: footballadmin)');
-    console.error('  RDS_PORT     - RDS port (default: 5432)');
-    process.exit(1);
-  }
-
-  return {
-    bastionIp,
-    bastionKeyPath: process.env.BASTION_KEY || path.join(process.env.HOME || '~', '.ssh', 'football-bastion.pem'),
-    rdsHost,
-    rdsPort: parseInt(process.env.RDS_PORT || '5432', 10),
-    dbName: process.env.DB_NAME || 'football',
-    dbUser: process.env.DB_USER || 'footballadmin',
-    dbPassword,
-  };
-}
 
 async function waitForPort(port: number, timeoutMs = 15000): Promise<void> {
   const start = Date.now();
@@ -66,7 +27,7 @@ async function waitForPort(port: number, timeoutMs = 15000): Promise<void> {
   throw new Error(`Timed out waiting for port ${port} to be available`);
 }
 
-function startTunnel(config: Config): ChildProcess {
+function startTunnel(config: AdminDbConfig): ChildProcess {
   console.log(`Opening SSH tunnel: localhost:${LOCAL_PORT} -> ${config.rdsHost}:${config.rdsPort} via ${config.bastionIp}`);
 
   const tunnel = spawn('ssh', [
@@ -112,7 +73,7 @@ async function getAppliedMigrations(client: Client): Promise<Set<string>> {
 }
 
 async function runMigrations() {
-  const config = getConfig();
+  const config = await getAdminDbConfig();
   const migrationFiles = getMigrationFiles();
 
   if (migrationFiles.length === 0) {

@@ -29,6 +29,7 @@ scripts/
   build.ts          # esbuild bundling for Lambda deployment
   migrate.ts        # Run DB migrations via bastion tunnel
   backfill.ts       # One-time historical data backfill (2023-2025)
+  lib/              # Shared helpers for admin scripts
 ```
 
 ## Scripts
@@ -39,6 +40,26 @@ npm run typecheck   # TypeScript type checking
 npm run migrate     # Run SQL migrations against RDS
 npm run backfill    # Backfill historical player/stats data
 ```
+
+## Database Credentials
+
+The RDS master password is now managed by AWS Secrets Manager instead of a tracked Terraform variable.
+
+- Lambda functions resolve the managed secret at runtime using `DB_INSTANCE_IDENTIFIER` plus IAM.
+- Local admin scripts use your local AWS credentials plus either `DB_INSTANCE_IDENTIFIER` or `DB_SECRET_ARN`.
+- The old raw `DB_PASSWORD` environment variable still works as a temporary fallback during the cutover, but it is no longer the recommended path.
+
+For local scripts, export the DB instance identifier or the secret ARN:
+
+```bash
+export DB_INSTANCE_IDENTIFIER="football-backend-dev-db"
+
+# optional after the first secret-managed apply
+cd terraform
+export DB_SECRET_ARN="$(terraform output -raw db_master_secret_arn)"
+```
+
+The resolved AWS DB metadata/secret and the shared Postgres pool are cached for 5 minutes by default to balance secret rotation support with cold-start overhead. Override that with `DB_CONFIG_CACHE_TTL_MS` if you need a shorter refresh window for local testing or faster credential rotation pickup.
 
 ## Bastion Host Access
 

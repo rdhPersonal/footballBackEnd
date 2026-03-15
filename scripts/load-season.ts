@@ -13,6 +13,7 @@ import {
 import { deriveRosterStintsFromGames } from '../src/shared/roster-stints';
 import { parseGameStats } from '../src/shared/stat-parser';
 import { upsertGameStats } from '../src/shared/db/writes/statWrites';
+import { getAdminDbConfig, type AdminDbConfig } from './lib/db-admin-config';
 
 const LOCAL_PORT = 15432;
 const API_DELAY_MS = 300;
@@ -162,35 +163,6 @@ function parseArgs(): CliArgs {
   return { season, weekStart: resolvedStart, weekEnd: resolvedEnd, clean };
 }
 
-interface Config {
-  bastionIp: string;
-  bastionKeyPath: string;
-  rdsHost: string;
-  dbPassword: string;
-  dbName: string;
-  dbUser: string;
-}
-
-function getConfig(): Config {
-  const bastionIp = process.env.BASTION_IP;
-  const rdsHost = process.env.RDS_HOST;
-  const dbPassword = process.env.DB_PASSWORD;
-
-  if (!bastionIp || !rdsHost || !dbPassword) {
-    console.error('Required: BASTION_IP, RDS_HOST, DB_PASSWORD');
-    process.exit(1);
-  }
-
-  return {
-    bastionIp,
-    bastionKeyPath: process.env.BASTION_KEY || `${process.env.HOME}/.ssh/football-bastion.pem`,
-    rdsHost,
-    dbPassword,
-    dbName: process.env.DB_NAME || 'football',
-    dbUser: process.env.DB_USER || 'footballadmin',
-  };
-}
-
 async function waitForPort(port: number, timeoutMs = 15000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -210,13 +182,13 @@ async function waitForPort(port: number, timeoutMs = 15000): Promise<void> {
   throw new Error(`Timed out waiting for port ${port}`);
 }
 
-function startTunnel(config: Config): ChildProcess {
+function startTunnel(config: AdminDbConfig): ChildProcess {
   console.log(`Opening SSH tunnel via ${config.bastionIp}...`);
   const tunnel = spawn('ssh', [
     '-i', config.bastionKeyPath,
     '-o', 'StrictHostKeyChecking=accept-new',
     '-N',
-    '-L', `${LOCAL_PORT}:${config.rdsHost}:5432`,
+    '-L', `${LOCAL_PORT}:${config.rdsHost}:${config.rdsPort}`,
     `ec2-user@${config.bastionIp}`,
   ], { stdio: 'pipe' });
   tunnel.stderr?.on('data', (d: Buffer) => {
@@ -291,7 +263,7 @@ async function cleanSeasonData(db: Client, season: number, weekStart: number, we
 
 async function loadSeason() {
   const cliArgs = parseArgs();
-  const config = getConfig();
+  const config = await getAdminDbConfig();
   const tunnel = startTunnel(config);
 
   try {

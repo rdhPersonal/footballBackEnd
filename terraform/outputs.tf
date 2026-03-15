@@ -52,6 +52,11 @@ output "rds_db_name" {
   value       = aws_db_instance.main.db_name
 }
 
+output "db_master_secret_arn" {
+  description = "Secrets Manager ARN for the RDS master user secret"
+  value       = try(aws_db_instance.main.master_user_secret[0].secret_arn, null)
+}
+
 # Phase 4 outputs
 
 output "cognito_user_pool_id" {

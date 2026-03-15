@@ -17,7 +17,7 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
     throw err;
   }
 
-  const pool = getPool();
+  const pool = await getPool();
   const teams = await getTeams(pool, { season });
 
   const body = {
