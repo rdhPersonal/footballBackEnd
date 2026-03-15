@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { GetPlayerResponse, Position, RosterStatus } from '@football/api-contract';
+import type { GetPlayerResponse, Position, RosterStatus } from '@shared/types/api-contract';
 import { getPool } from '../../shared/db';
 import { getPlayerById } from '../../shared/db/queries/playerQueries';
 import { success, notFound, badRequest } from '../../shared/middleware/response';

@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
-import type { GetSeasonsResponse } from '@football/api-contract';
+import type { GetSeasonsResponse } from '@shared/types/api-contract';
 import { getPool } from '../../shared/db';
 import { getSeasonsSummary } from '../../shared/db/queries/metaQueries';
 import { success } from '../../shared/middleware/response';

@@ -16,10 +16,9 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/shared/*"],
-      "@football/api-contract": ["packages/api-contract/src/index.ts"]
+      "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "packages/**/*.ts"],
+  "include": ["src/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
