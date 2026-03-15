@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { GetPlayerScoresResponse } from '@football/api-contract';
 import { getPool } from '../../shared/db';
 import { getScoringConfigByName, getPlayerWeeklyScores } from '../../shared/db/queries/scoringQueries';
 import { success, badRequest, notFound } from '../../shared/middleware/response';
@@ -37,7 +38,7 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
 
   const totalPoints = scores.reduce((sum, s) => sum + parseFloat(s.points), 0);
 
-  return success({
+  const body = {
     playerId,
     season,
     scoringFormat: config.name,
@@ -47,7 +48,9 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
       teamAbbr: s.team_abbr,
       points: parseFloat(s.points),
     })),
-  });
+  } satisfies GetPlayerScoresResponse;
+
+  return success(body);
 }
 
 export const handler = withErrorHandler(handle);

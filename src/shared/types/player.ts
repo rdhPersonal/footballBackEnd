@@ -1,32 +1,19 @@
-export type Position = 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'P' | 'DEF';
+import type {
+  PlayerDto,
+  Position,
+  RosterStatus,
+  TransactionType,
+  PassingStatsDto,
+  RushingStatsDto,
+  ReceivingStatsDto,
+  KickingStatsDto,
+  ScoringConfigDto,
+  TeamDto,
+} from '@football/api-contract';
 
-export type RosterStatus =
-  | 'active'
-  | 'practice_squad'
-  | 'injured_reserve'
-  | 'suspended'
-  | 'pup';
+export type { Position, RosterStatus, TransactionType };
 
-export type TransactionType =
-  | 'drafted'
-  | 'signed'
-  | 'traded'
-  | 'claimed'
-  | 'promoted'
-  | 'demoted'
-  | 'activated'
-  | 'released';
-
-export interface Player {
-  id: string;
-  externalId: string;
-  name: string;
-  position: Position;
-  photoUrl?: string;
-  dateOfBirth?: string;
-  college?: string;
-  heightInches?: number;
-  weightLbs?: number;
+export interface Player extends Omit<PlayerDto, 'currentTeamAbbr' | 'rosterStatus'> {
   createdAt: string;
   updatedAt: string;
 }
@@ -45,63 +32,24 @@ export interface TeamRoster {
 
 // ----- Strongly typed stat interfaces -----
 
-export interface PassingStats {
+export interface PassingStats extends PassingStatsDto {
   playerId: string;
-  season: number;
-  week: number;
-  teamAbbr: string;
   eventId?: string;
-  attempts: number;
-  completions: number;
-  yards: number;
-  touchdowns: number;
-  interceptions: number;
-  sacks: number;
-  longest: number;
-  qbRating?: number;
-  adjQbr?: number;
 }
 
-export interface RushingStats {
+export interface RushingStats extends RushingStatsDto {
   playerId: string;
-  season: number;
-  week: number;
-  teamAbbr: string;
   eventId?: string;
-  attempts: number;
-  yards: number;
-  touchdowns: number;
-  longest: number;
-  fumbles: number;
-  fumblesLost: number;
 }
 
-export interface ReceivingStats {
+export interface ReceivingStats extends ReceivingStatsDto {
   playerId: string;
-  season: number;
-  week: number;
-  teamAbbr: string;
   eventId?: string;
-  targets: number;
-  receptions: number;
-  yards: number;
-  touchdowns: number;
-  longest: number;
 }
 
-export interface KickingStats {
+export interface KickingStats extends KickingStatsDto {
   playerId: string;
-  season: number;
-  week: number;
-  teamAbbr: string;
   eventId?: string;
-  fgMade: number;
-  fgAttempted: number;
-  fgLong: number;
-  fgPct?: number;
-  xpMade: number;
-  xpAttempted: number;
-  points: number;
 }
 
 export interface PlayerGameStats {
@@ -111,30 +59,6 @@ export interface PlayerGameStats {
   kicking?: KickingStats;
 }
 
-export interface ScoringConfig {
-  id: number;
-  name: string;
-  description?: string;
-  passingYardPts: number;
-  passingTdPts: number;
-  interceptionPts: number;
-  sackPts: number;
-  rushingYardPts: number;
-  rushingTdPts: number;
-  receivingYardPts: number;
-  receivingTdPts: number;
-  receptionPts: number;
-  fumbleLostPts: number;
-  fgMadePts: number;
-  xpMadePts: number;
-}
+export type ScoringConfig = ScoringConfigDto;
 
-export interface NflTeam {
-  id: number;
-  abbr: string;
-  name: string;
-  conference: string;
-  division: string;
-  byeWeek?: number;
-  season: number;
-}
+export type NflTeam = TeamDto;

@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { GetSeasonsResponse } from '@football/api-contract';
 import { getPool } from '../../shared/db';
 import { getSeasonsSummary } from '../../shared/db/queries/metaQueries';
 import { success } from '../../shared/middleware/response';
@@ -8,7 +9,7 @@ async function handle(_event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRe
   const pool = getPool();
   const seasons = await getSeasonsSummary(pool);
 
-  return success({
+  const body = {
     seasons: seasons.map((s) => ({
       season: s.season,
       playerCount: parseInt(String(s.player_count), 10),
@@ -21,7 +22,9 @@ async function handle(_event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRe
         kicking: parseInt(String(s.kicking_rows), 10),
       },
     })),
-  });
+  } satisfies GetSeasonsResponse;
+
+  return success(body);
 }
 
 export const handler = withErrorHandler(handle);

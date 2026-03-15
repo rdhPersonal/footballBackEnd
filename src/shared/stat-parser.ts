@@ -61,8 +61,8 @@ function parsePassingFromMap(m: StatMap): Omit<PassingStats, 'playerId' | 'seaso
     interceptions: toInt(m.interceptions),
     sacks: toInt(m.sacks),
     longest: toInt(m.longPassing),
-    qbRating: toFloat(m.QBRating),
-    adjQbr: toFloat(m.adjQBR),
+    qbRating: toFloat(m.QBRating) ?? null,
+    adjQbr: toFloat(m.adjQBR) ?? null,
   };
 }
 
@@ -116,7 +116,7 @@ function parseKickingFromMap(m: StatMap): Omit<KickingStats, 'playerId' | 'seaso
     fgMade,
     fgAttempted,
     fgLong: toInt(m.longFieldGoalMade),
-    fgPct: toFloat(m.fieldGoalPct),
+    fgPct: toFloat(m.fieldGoalPct) ?? null,
     xpMade,
     xpAttempted,
     points: toInt(m.totalKickingPoints),

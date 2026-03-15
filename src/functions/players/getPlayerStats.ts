@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { GetPlayerStatsResponse } from '@football/api-contract';
 import { getPool } from '../../shared/db';
 import {
   getPassingStats,
@@ -40,7 +41,7 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
     getKickingStats(pool, queryParams),
   ]);
 
-  return success({
+  const body = {
     playerId,
     passing: passing.map((s) => ({
       season: s.season,
@@ -89,7 +90,9 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
       xpAttempted: s.xp_attempted,
       points: s.points,
     })),
-  });
+  } satisfies GetPlayerStatsResponse;
+
+  return success(body);
 }
 
 export const handler = withErrorHandler(handle);

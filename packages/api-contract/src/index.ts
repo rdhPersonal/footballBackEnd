@@ -23,10 +23,10 @@ export interface PlayerDto {
   name: string;
   position: Position;
   photoUrl: string | null;
-  dateOfBirth?: string;
-  college?: string;
-  heightInches?: number;
-  weightLbs?: number;
+  dateOfBirth: string | null;
+  college: string | null;
+  heightInches: number | null;
+  weightLbs: number | null;
   currentTeamAbbr: string | null;
   rosterStatus: RosterStatus | null;
 }
@@ -42,8 +42,8 @@ export interface PassingStatsDto {
   interceptions: number;
   sacks: number;
   longest: number;
-  qbRating?: number | null;
-  adjQbr?: number | null;
+  qbRating: number | null;
+  adjQbr: number | null;
 }
 
 export interface RushingStatsDto {
@@ -76,7 +76,7 @@ export interface KickingStatsDto {
   fgMade: number;
   fgAttempted: number;
   fgLong: number;
-  fgPct?: number | null;
+  fgPct: number | null;
   xpMade: number;
   xpAttempted: number;
   points: number;
@@ -85,7 +85,7 @@ export interface KickingStatsDto {
 export interface ScoringConfigDto {
   id: number;
   name: string;
-  description?: string;
+  description: string | null;
   passingYardPts: number;
   passingTdPts: number;
   interceptionPts: number;
@@ -106,16 +106,18 @@ export interface TeamDto {
   name: string;
   conference: string;
   division: string;
-  byeWeek?: number;
+  byeWeek: number | null;
   season: number;
 }
+
+export type PlayerSearchPosition = Exclude<Position, 'P'>;
 
 export interface ApiErrorResponse {
   error: string;
 }
 
 export interface GetPlayersQuery {
-  position?: 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DEF';
+  position?: PlayerSearchPosition;
   team?: string;
   search?: string;
   season?: number;

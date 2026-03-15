@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { GetPlayersResponse, Position, RosterStatus } from '@football/api-contract';
 import { getPool } from '../../shared/db';
 import { searchPlayers } from '../../shared/db/queries/playerQueries';
 import { success, badRequest } from '../../shared/middleware/response';
@@ -32,25 +33,27 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
   const pool = getPool();
   const { players, totalCount } = await searchPlayers(pool, { position, team, season, search, limit, offset });
 
-  return success({
+  const body = {
     players: players.map((p) => ({
       id: p.id,
       externalId: p.external_id,
       name: p.name,
-      position: p.position,
+      position: p.position as Position,
       photoUrl: p.photo_url,
       dateOfBirth: p.date_of_birth,
       college: p.college,
       heightInches: p.height_inches,
       weightLbs: p.weight_lbs,
       currentTeamAbbr: p.current_team_abbr,
-      rosterStatus: p.roster_status,
+      rosterStatus: p.roster_status as RosterStatus | null,
     })),
     totalCount,
     count: players.length,
     limit,
     offset,
-  });
+  } satisfies GetPlayersResponse;
+
+  return success(body);
 }
 
 export const handler = withErrorHandler(handle);

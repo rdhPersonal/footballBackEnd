@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "pg": "^8.13.0",
-    "@football/api-contract": "workspace:*"
+    "@football/api-contract": "*"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.145",

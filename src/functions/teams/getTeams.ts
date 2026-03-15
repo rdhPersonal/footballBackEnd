@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+import type { GetTeamsResponse } from '@football/api-contract';
 import { getPool } from '../../shared/db';
 import { getTeams } from '../../shared/db/queries/teamQueries';
 import { success, badRequest } from '../../shared/middleware/response';
@@ -19,7 +20,7 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
   const pool = getPool();
   const teams = await getTeams(pool, { season });
 
-  return success({
+  const body = {
     teams: teams.map((t) => ({
       id: t.id,
       abbr: t.abbr,
@@ -30,7 +31,9 @@ async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyRes
       season: t.season,
     })),
     count: teams.length,
-  });
+  } satisfies GetTeamsResponse;
+
+  return success(body);
 }
 
 export const handler = withErrorHandler(handle);
