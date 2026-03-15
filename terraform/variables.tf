@@ -87,7 +87,7 @@ variable "cognito_logout_urls" {
 
 # Frontend (Phase 4)
 
-variable "frontend_url" {
-  description = "Frontend origin URL for API Gateway CORS (e.g. http://localhost:3000)"
-  type        = string
+variable "frontend_urls" {
+  description = "Allowed frontend origin URLs for API Gateway CORS"
+  type        = list(string)
 }

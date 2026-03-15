@@ -8,7 +8,7 @@ resource "aws_apigatewayv2_api" "main" {
   description   = "NFL player statistics API"
 
   cors_configuration {
-    allow_origins = [var.frontend_url]
+    allow_origins = var.frontend_urls
     allow_methods = ["GET", "OPTIONS"]
     allow_headers = ["Content-Type", "Authorization"]
     max_age       = 3600
