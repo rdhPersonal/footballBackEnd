@@ -3,7 +3,7 @@ import type {
   GetPlayerRosterHistoryResponse,
   RosterStatus,
   TransactionType,
-} from '@football/api-contract';
+} from '@shared/types/api-contract';
 import { getPool } from '../../shared/db';
 import { getPlayerRosterHistory } from '../../shared/db/queries/rosterQueries';
 import { success, badRequest } from '../../shared/middleware/response';

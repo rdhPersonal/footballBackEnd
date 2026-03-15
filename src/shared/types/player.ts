@@ -9,7 +9,7 @@ import type {
   KickingStatsDto,
   ScoringConfigDto,
   TeamDto,
-} from '@football/api-contract';
+} from './api-contract';
 
 export type { Position, RosterStatus, TransactionType };
 
